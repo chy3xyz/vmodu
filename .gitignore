@@ -3,15 +3,18 @@
 .DS_Store
 **/.DS_Store
 
-# Build artifacts / local binaries
+# Build artifacts / local binaries (root only — keep library dir vmodu/)
 /main
-/vmodu
 /vclaw
-*.exe
+/*.exe
 *.so
 *.dylib
 *.o
 *.tmp
+examples/chy3/chy3
+examples/scaffold_demo/scaffold_demo
+
+
 
 # Env secrets
 .env
