@@ -1,0 +1,48 @@
+{
+  "server": {
+    "http_port": 8080,
+    "grpc_port": 9090,
+    "host": "0.0.0.0",
+    "read_timeout": 30,
+    "write_timeout": 30,
+    "max_body_size": 10485760
+  },
+  "actor": {
+    "mailbox_size": 100,
+    "worker_pool_size": 16,
+    "max_actors": 10000,
+    "supervisor_restart_max": 5
+  },
+  "storage": {
+    "data_dir": "./data",
+    "segment_size": 10000,
+    "buffer_size": 8192,
+    "flush_interval_ms": 100,
+    "fsync_on_write": true
+  },
+  "cluster": {
+    "node_id": "node-1",
+    "bind_address": "0.0.0.0",
+    "raft_port": 12000,
+    "peer_addresses": [],
+    "heartbeat_ms": 100,
+    "election_timeout_ms": 1000
+  },
+  "llm": {
+    "provider": "openai",
+    "api_key": "",
+    "model": "gpt-4",
+    "max_tokens": 2048,
+    "temperature": 0.7,
+    "timeout_ms": 30000,
+    "max_retries": 3
+  },
+  "log": {
+    "level": "info",
+    "format": "json",
+    "output": "stdout",
+    "max_size_mb": 100,
+    "max_backups": 5,
+    "max_age_days": 30
+  }
+}

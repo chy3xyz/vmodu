@@ -1,0 +1,23 @@
+
+# OS
+.DS_Store
+**/.DS_Store
+
+# Build artifacts / local binaries
+/main
+/vmodu
+/vclaw
+*.exe
+*.so
+*.dylib
+*.o
+*.tmp
+
+# Env secrets
+.env
+deploy/.env
+**/.env
+
+# local agent/db snapshots
+codedb.snapshot
+

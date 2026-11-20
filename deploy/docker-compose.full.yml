@@ -1,0 +1,532 @@
+# ═══════════════════════════════════════════════════════════════
+# VModu Runtime - Full Infrastructure Docker Compose
+# Complete stack for enterprise/SaaS deployments
+# Usage: docker-compose -f deploy/docker-compose.full.yml up -d
+# ═══════════════════════════════════════════════════════════════
+
+version: "3.8"
+
+services:
+  # ═════════════════════════════════════════════════════════════
+  # VModu API Cluster (5 nodes)
+  # ═════════════════════════════════════════════════════════════
+  vmodu-api-1:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: production
+    container_name: vmodu-api-1
+    hostname: vmodu-api-1
+    restart: always
+    environment:
+      - VMODU_ENV=production
+      - VMODU_NODE_ID=node-1
+      - VMODU_CLUSTER_SEEDS=vmodu-api-2:9000,vmodu-api-3:9000,vmodu-api-4:9000,vmodu-api-5:9000
+    env_file:
+      - .env.full
+    volumes:
+      - vmodu_data_1:/data/vmodu
+    networks:
+      - vmodu_net
+    ports:
+      - "8081:8080"
+
+  vmodu-api-2:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: production
+    container_name: vmodu-api-2
+    hostname: vmodu-api-2
+    restart: always
+    environment:
+      - VMODU_ENV=production
+      - VMODU_NODE_ID=node-2
+      - VMODU_CLUSTER_SEEDS=vmodu-api-1:9000,vmodu-api-3:9000,vmodu-api-4:9000,vmodu-api-5:9000
+    env_file:
+      - .env.full
+    volumes:
+      - vmodu_data_2:/data/vmodu
+    networks:
+      - vmodu_net
+    ports:
+      - "8082:8080"
+
+  vmodu-api-3:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: production
+    container_name: vmodu-api-3
+    hostname: vmodu-api-3
+    restart: always
+    environment:
+      - VMODU_ENV=production
+      - VMODU_NODE_ID=node-3
+      - VMODU_CLUSTER_SEEDS=vmodu-api-1:9000,vmodu-api-2:9000,vmodu-api-4:9000,vmodu-api-5:9000
+    env_file:
+      - .env.full
+    volumes:
+      - vmodu_data_3:/data/vmodu
+    networks:
+      - vmodu_net
+    ports:
+      - "8083:8080"
+
+  vmodu-api-4:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: production
+    container_name: vmodu-api-4
+    hostname: vmodu-api-4
+    restart: always
+    environment:
+      - VMODU_ENV=production
+      - VMODU_NODE_ID=node-4
+      - VMODU_CLUSTER_SEEDS=vmodu-api-1:9000,vmodu-api-2:9000,vmodu-api-3:9000,vmodu-api-5:9000
+    env_file:
+      - .env.full
+    volumes:
+      - vmodu_data_4:/data/vmodu
+    networks:
+      - vmodu_net
+    ports:
+      - "8084:8080"
+
+  vmodu-api-5:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: production
+    container_name: vmodu-api-5
+    hostname: vmodu-api-5
+    restart: always
+    environment:
+      - VMODU_ENV=production
+      - VMODU_NODE_ID=node-5
+      - VMODU_CLUSTER_SEEDS=vmodu-api-1:9000,vmodu-api-2:9000,vmodu-api-3:9000,vmodu-api-4:9000
+    env_file:
+      - .env.full
+    volumes:
+      - vmodu_data_5:/data/vmodu
+    networks:
+      - vmodu_net
+    ports:
+      - "8085:8080"
+
+  # ═════════════════════════════════════════════════════════════
+  # HAProxy Load Balancer
+  # ═════════════════════════════════════════════════════════════
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: vmodu-haproxy
+    hostname: haproxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8404:8404"
+    volumes:
+      - ./config/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./config/haproxy/ssl:/etc/ssl/certs:ro
+    networks:
+      - vmodu_net
+    depends_on:
+      - vmodu-api-1
+      - vmodu-api-2
+      - vmodu-api-3
+      - vmodu-api-4
+      - vmodu-api-5
+
+  # ═════════════════════════════════════════════════════════════
+  # PostgreSQL Cluster (Patroni)
+  # ═════════════════════════════════════════════════════════════
+  postgres-1:
+    image: bitnami/postgresql-repmgr:16
+    container_name: vmodu-postgres-1
+    hostname: postgres-1
+    restart: always
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=${DB_ADMIN_PASSWORD}
+      - POSTGRESQL_USERNAME=vmodu
+      - POSTGRESQL_PASSWORD=${DB_PASSWORD}
+      - POSTGRESQL_DATABASE=vmodu
+      - REPMGR_PASSWORD=${REPMGR_PASSWORD}
+      - REPMGR_PRIMARY_HOST=postgres-1
+      - REPMGR_PRIMARY_PORT=5432
+      - REPMGR_PARTNER_NODES=postgres-1:5432,postgres-2:5432,postgres-3:5432
+      - REPMGR_NODE_NAME=postgres-1
+      - REPMGR_NODE_NETWORK_NAME=postgres-1
+      - REPMGR_PORT_NUMBER=5432
+      - REPMGR_CONNECT_TIMEOUT=5
+      - REPMGR_RECONNECT_ATTEMPTS=3
+      - REPMGR_RECONNECT_INTERVAL=5
+    volumes:
+      - postgres_1_data:/bitnami/postgresql
+    networks:
+      - vmodu_net
+
+  postgres-2:
+    image: bitnami/postgresql-repmgr:16
+    container_name: vmodu-postgres-2
+    hostname: postgres-2
+    restart: always
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=${DB_ADMIN_PASSWORD}
+      - POSTGRESQL_USERNAME=vmodu
+      - POSTGRESQL_PASSWORD=${DB_PASSWORD}
+      - POSTGRESQL_DATABASE=vmodu
+      - REPMGR_PASSWORD=${REPMGR_PASSWORD}
+      - REPMGR_PRIMARY_HOST=postgres-1
+      - REPMGR_PRIMARY_PORT=5432
+      - REPMGR_PARTNER_NODES=postgres-1:5432,postgres-2:5432,postgres-3:5432
+      - REPMGR_NODE_NAME=postgres-2
+      - REPMGR_NODE_NETWORK_NAME=postgres-2
+      - REPMGR_PORT_NUMBER=5432
+      - REPMGR_CONNECT_TIMEOUT=5
+      - REPMGR_RECONNECT_ATTEMPTS=3
+      - REPMGR_RECONNECT_INTERVAL=5
+    volumes:
+      - postgres_2_data:/bitnami/postgresql
+    networks:
+      - vmodu_net
+
+  postgres-3:
+    image: bitnami/postgresql-repmgr:16
+    container_name: vmodu-postgres-3
+    hostname: postgres-3
+    restart: always
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=${DB_ADMIN_PASSWORD}
+      - POSTGRESQL_USERNAME=vmodu
+      - POSTGRESQL_PASSWORD=${DB_PASSWORD}
+      - POSTGRESQL_DATABASE=vmodu
+      - REPMGR_PASSWORD=${REPMGR_PASSWORD}
+      - REPMGR_PRIMARY_HOST=postgres-1
+      - REPMGR_PRIMARY_PORT=5432
+      - REPMGR_PARTNER_NODES=postgres-1:5432,postgres-2:5432,postgres-3:5432
+      - REPMGR_NODE_NAME=postgres-3
+      - REPMGR_NODE_NETWORK_NAME=postgres-3
+      - REPMGR_PORT_NUMBER=5432
+      - REPMGR_CONNECT_TIMEOUT=5
+      - REPMGR_RECONNECT_ATTEMPTS=3
+      - REPMGR_RECONNECT_INTERVAL=5
+    volumes:
+      - postgres_3_data:/bitnami/postgresql
+    networks:
+      - vmodu_net
+
+  pgpool:
+    image: bitnami/pgpool:4
+    container_name: vmodu-pgpool
+    hostname: pgpool
+    restart: always
+    environment:
+      - PGPOOL_BACKEND_NODES=0:postgres-1:5432,1:postgres-2:5432,2:postgres-3:5432
+      - PGPOOL_SR_CHECK_USER=vmodu
+      - PGPOOL_SR_CHECK_PASSWORD=${DB_PASSWORD}
+      - PGPOOL_ENABLE_LDAP=no
+      - PGPOOL_POSTGRES_USERNAME=vmodu
+      - PGPOOL_POSTGRES_PASSWORD=${DB_PASSWORD}
+      - PGPOOL_ADMIN_USERNAME=admin
+      - PGPOOL_ADMIN_PASSWORD=${DB_ADMIN_PASSWORD}
+    ports:
+      - "5432:5432"
+    networks:
+      - vmodu_net
+    depends_on:
+      - postgres-1
+      - postgres-2
+      - postgres-3
+
+  # ═════════════════════════════════════════════════════════════
+  # Redis Cluster
+  # ═════════════════════════════════════════════════════════════
+  redis-1:
+    image: bitnami/redis-cluster:7.2
+    container_name: vmodu-redis-1
+    hostname: redis-1
+    restart: always
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_CLUSTER_REPLICAS=1
+      - REDIS_NODES=redis-1,redis-2,redis-3,redis-4,redis-5,redis-6
+      - REDIS_CLUSTER_CREATOR=yes
+      - REDIS_CLUSTER_REPLICAS=1
+    volumes:
+      - redis_1_data:/bitnami/redis/data
+    networks:
+      - vmodu_net
+
+  redis-2:
+    image: bitnami/redis-cluster:7.2
+    container_name: vmodu-redis-2
+    hostname: redis-2
+    restart: always
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_CLUSTER_REPLICAS=1
+      - REDIS_NODES=redis-1,redis-2,redis-3,redis-4,redis-5,redis-6
+    volumes:
+      - redis_2_data:/bitnami/redis/data
+    networks:
+      - vmodu_net
+
+  redis-3:
+    image: bitnami/redis-cluster:7.2
+    container_name: vmodu-redis-3
+    hostname: redis-3
+    restart: always
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_CLUSTER_REPLICAS=1
+      - REDIS_NODES=redis-1,redis-2,redis-3,redis-4,redis-5,redis-6
+    volumes:
+      - redis_3_data:/bitnami/redis/data
+    networks:
+      - vmodu_net
+
+  redis-4:
+    image: bitnami/redis-cluster:7.2
+    container_name: vmodu-redis-4
+    hostname: redis-4
+    restart: always
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_CLUSTER_REPLICAS=1
+      - REDIS_NODES=redis-1,redis-2,redis-3,redis-4,redis-5,redis-6
+    volumes:
+      - redis_4_data:/bitnami/redis/data
+    networks:
+      - vmodu_net
+
+  redis-5:
+    image: bitnami/redis-cluster:7.2
+    container_name: vmodu-redis-5
+    hostname: redis-5
+    restart: always
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_CLUSTER_REPLICAS=1
+      - REDIS_NODES=redis-1,redis-2,redis-3,redis-4,redis-5,redis-6
+    volumes:
+      - redis_5_data:/bitnami/redis/data
+    networks:
+      - vmodu_net
+
+  redis-6:
+    image: bitnami/redis-cluster:7.2
+    container_name: vmodu-redis-6
+    hostname: redis-6
+    restart: always
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_CLUSTER_REPLICAS=1
+      - REDIS_NODES=redis-1,redis-2,redis-3,redis-4,redis-5,redis-6
+    volumes:
+      - redis_6_data:/bitnami/redis/data
+    networks:
+      - vmodu_net
+
+  # ═════════════════════════════════════════════════════════════
+  # Apache Kafka
+  # ═════════════════════════════════════════════════════════════
+  zookeeper:
+    image: bitnami/zookeeper:3.9
+    container_name: vmodu-zookeeper
+    hostname: zookeeper
+    restart: always
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    volumes:
+      - zookeeper_data:/bitnami/zookeeper
+    networks:
+      - vmodu_net
+
+  kafka-1:
+    image: bitnami/kafka:3.6
+    container_name: vmodu-kafka-1
+    hostname: kafka-1
+    restart: always
+    environment:
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka-1:9093,2@kafka-2:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka-1:9092
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_KRAFT_CLUSTER_ID=abcdefghijklmnopqrstuv
+    volumes:
+      - kafka_1_data:/bitnami/kafka
+    networks:
+      - vmodu_net
+    depends_on:
+      - zookeeper
+
+  kafka-2:
+    image: bitnami/kafka:3.6
+    container_name: vmodu-kafka-2
+    hostname: kafka-2
+    restart: always
+    environment:
+      - KAFKA_CFG_NODE_ID=2
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka-1:9093,2@kafka-2:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka-2:9092
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_KRAFT_CLUSTER_ID=abcdefghijklmnopqrstuv
+    volumes:
+      - kafka_2_data:/bitnami/kafka
+    networks:
+      - vmodu_net
+    depends_on:
+      - zookeeper
+
+  # ═════════════════════════════════════════════════════════════
+  # ClickHouse (Analytics)
+  # ═════════════════════════════════════════════════════════════
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1
+    container_name: vmodu-clickhouse
+    hostname: clickhouse
+    restart: always
+    environment:
+      - CLICKHOUSE_DB=vmodu
+      - CLICKHOUSE_USER=vmodu
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./config/clickhouse/config.xml:/etc/clickhouse-server/config.d/config.xml:ro
+    ports:
+      - "8123:8123"
+      - "9001:9000"
+    networks:
+      - vmodu_net
+
+  # ═════════════════════════════════════════════════════════════
+  # MongoDB (Document Store)
+  # ═════════════════════════════════════════════════════════════
+  mongodb:
+    image: mongo:7.0
+    container_name: vmodu-mongodb
+    hostname: mongodb
+    restart: always
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=vmodu
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_INITDB_DATABASE=vmodu
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - vmodu_net
+
+  # ═════════════════════════════════════════════════════════════
+  # Monitoring Stack
+  # ═════════════════════════════════════════════════════════════
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: vmodu-prometheus
+    hostname: prometheus
+    restart: always
+    volumes:
+      - ./config/prometheus/prometheus-full.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - vmodu_net
+
+  grafana:
+    image: grafana/grafana:10.3.0
+    container_name: vmodu-grafana
+    hostname: grafana
+    restart: always
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - vmodu_net
+    depends_on:
+      - prometheus
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.50
+    container_name: vmodu-jaeger
+    hostname: jaeger
+    restart: always
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - vmodu_net
+
+  # ═════════════════════════════════════════════════════════════
+  # etcd (Service Discovery)
+  # ═════════════════════════════════════════════════════════════
+  etcd:
+    image: bitnami/etcd:3.5
+    container_name: vmodu-etcd
+    hostname: etcd
+    restart: always
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+    volumes:
+      - etcd_data:/bitnami/etcd
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    networks:
+      - vmodu_net
+
+# ═══════════════════════════════════════════════════════════════
+# Networks
+# ═══════════════════════════════════════════════════════════════
+networks:
+  vmodu_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+
+# ═══════════════════════════════════════════════════════════════
+# Volumes
+# ═══════════════════════════════════════════════════════════════
+volumes:
+  vmodu_data_1:
+  vmodu_data_2:
+  vmodu_data_3:
+  vmodu_data_4:
+  vmodu_data_5:
+  postgres_1_data:
+  postgres_2_data:
+  postgres_3_data:
+  redis_1_data:
+  redis_2_data:
+  redis_3_data:
+  redis_4_data:
+  redis_5_data:
+  redis_6_data:
+  kafka_1_data:
+  kafka_2_data:
+  zookeeper_data:
+  clickhouse_data:
+  mongodb_data:
+  prometheus_data:
+  grafana_data:
+  etcd_data:

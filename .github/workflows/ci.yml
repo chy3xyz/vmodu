@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install V
+        run: |
+          git clone --depth 1 https://github.com/vlang/v /tmp/vlang
+          make -C /tmp/vlang
+          echo "/tmp/vlang" >> "$GITHUB_PATH"
+          /tmp/vlang/v version
+
+      - name: Build main
+        run: v -o /tmp/vmodu_main main.v
+
+      - name: Smoke health endpoint
+        run: |
+          /tmp/vmodu_main > /tmp/vmodu.log 2>&1 &
+          echo $! > /tmp/vmodu.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/health | grep -q ok; then
+              echo "health ok"
+              break
+            fi
+            sleep 0.5
+          done
+          curl -sf http://127.0.0.1:8080/health
+          curl -sf http://127.0.0.1:8080/metrics | head -n 5
+          kill "$(cat /tmp/vmodu.pid)" || true
+
+      - name: Unit tests (recommended subset)
+        run: |
+          set -e
+          for p in \
+            vmodu/infra/http \
+            vmodu/cluster/raft \
+            vmodu/infra/auth \
+            vmodu/infra/db/sql \
+            vmodu/infra/pool \
+            vmodu/infra/metrics \
+            vmodu/event/bus \
+            vmodu/infra/circuit \
+            vmodu/agent/llm
+          do
+            echo "==> v test $p"
+            v test "$p"
+          done
+
+      - name: veb_adapter tests (best-effort)
+        continue-on-error: true
+        run: v test vmodu/adapter/veb_adapter
