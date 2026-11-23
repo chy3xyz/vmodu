@@ -53,6 +53,8 @@ v test vmodu/infra/auth
 v test vmodu/infra/db/sql
 v test vmodu/infra/pool
 v test vmodu/infra/metrics
+v test vmodu/infra/trace
+v test vmodu/config
 v test vmodu/event/bus
 v test vmodu/infra/circuit
 v test vmodu/agent/llm

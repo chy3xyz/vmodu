@@ -22,8 +22,8 @@
 
 ## Before release (maintainers on GitHub)
 
-- [ ] Settings → Code security → **Private vulnerability reporting** = On
-- [ ] Default branch name matches CI badge (`main` / `master`)
+- [x] Settings → Code security → **Private vulnerability reporting** = On
+- [x] Default branch name matches CI badge (`main`)
 - [ ] Clean-machine smoke: `cd deploy && cp .env.example .env && docker compose up -d` (trim services as needed)
 
 ## Wave 1 hardening (2026-11-21)
@@ -38,17 +38,13 @@
 - [x] Wave 5: per-IP rate limit; 429 metrics; WAL fsync policy
 - [x] Wave 6: request IDs + access log; `/health/deep`; compose-smoke script/CI
 - [x] Wave 7: HTTP trace middleware; `VMODU_*` runtime config; v0.2.0 cut (`VERSION` / `docs/RELEASE.md`)
-- [ ] Post-0.2: GitHub Release publish; Private vuln reporting on; live docker compose up smoke
-
-
-
-
-
+- [x] Post-0.2: GitHub Release + tag `v0.2.0` published
+- [x] Post-0.2: Private vuln reporting on
+- [ ] Post-0.2: live docker compose up smoke
 
 ## Optional
 
 - [x] Best practices refreshed for v0.2.0 (EN default + `.zh.md`); `MODULES_GUIDE` still CN-heavy
 - [ ] Full English pass on `MODULES_GUIDE`
-- [ ] Release tag + GitHub Release notes
 - [ ] Third-party NOTICE if non-MIT deps land
 

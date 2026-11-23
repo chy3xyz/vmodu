@@ -12,8 +12,8 @@
 
 ## 发布前（GitHub）
 
-- [ ] 开启 Private vulnerability reporting
-- [ ] 默认分支与 CI badge 一致
+- [x] 开启 Private vulnerability reporting
+- [x] 默认分支与 CI badge 一致（`main`）
 - [ ] 干净环境 `docker compose` 冒烟
 
 ## Wave 1 硬化（2026-11-21）
@@ -28,16 +28,12 @@
 - [x] Wave 5：按 IP 限流；429 指标；WAL fsync 策略
 - [x] Wave 6：请求 ID + 访问日志；`/health/deep`；compose-smoke
 - [x] Wave 7：HTTP trace 中间件；`VMODU_*` 配置；v0.2.0 切割
-- [ ] 0.2 之后：GitHub Release；开启 Private vuln reporting；真实 compose up 冒烟
-
-
-
-
-
+- [x] 0.2 之后：GitHub Release + tag `v0.2.0` 已发布
+- [x] 0.2 之后：已开启 Private vuln reporting
+- [ ] 0.2 之后：真实 compose up 冒烟
 
 ## 可选
 
 - [x] 最佳实践已按 v0.2.0 刷新（英文默认 + `.zh.md`）
 - [ ] `MODULES_GUIDE` 全文英文化
-- [ ] Release tag + 说明
 - [ ] 第三方 NOTICE（若有非 MIT）

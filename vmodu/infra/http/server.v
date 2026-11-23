@@ -287,14 +287,18 @@ fn (mut s Server) accept_loop() {
 			continue
 		}
 
-		s.mu.rlock()
-		over_limit := s.requests_active >= s.max_connections
-		s.mu.runlock()
-		if over_limit {
+		// Reserve a slot under the lock so max_connections cannot race
+		// between accept and handle_connection (CI flake otherwise).
+		s.mu.lock()
+		if s.requests_active >= s.max_connections {
+			s.mu.unlock()
 			s.write_raw(mut conn, 503, 'text/plain', 'Service Unavailable')
 			conn.close() or {}
 			continue
 		}
+		s.requests_active++
+		s.requests_total++
+		s.mu.unlock()
 
 		spawn s.handle_connection(mut conn)
 	}
@@ -308,10 +312,6 @@ fn (mut s Server) handle_connection(mut conn net.TcpConn) {
 	conn.set_read_timeout(s.read_timeout)
 	conn.set_write_timeout(s.write_timeout)
 
-	s.mu.lock()
-	s.requests_active++
-	s.requests_total++
-	s.mu.unlock()
 	defer {
 		s.mu.lock()
 		s.requests_active--

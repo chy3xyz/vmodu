@@ -174,14 +174,17 @@ fn test_per_ip_rate_limit_rejects() {
 
 fn test_max_connections_rejects() {
 	mut server := new_server(ServerConfig{
-		host:            '127.0.0.1'
-		port:            0
-		max_connections: 1
-		stop_timeout_ms: 2000
+		host:              '127.0.0.1'
+		port:              0
+		max_connections:   1
+		stop_timeout_ms:   2000
+		rate_limit_rps:    0
+		rate_limit_per_ip: false
+		access_log:        false
 	})
 
 	server.get('/slow', fn (ctx Context) !Response {
-		time.sleep(500 * time.millisecond)
+		time.sleep(800 * time.millisecond)
 		mut resp := new_response()
 		resp.status_code = 200
 		resp.body = 'ok'
@@ -204,7 +207,7 @@ fn test_max_connections_rejects() {
 	}()
 
 	mut saw_active := false
-	for _ in 0 .. 50 {
+	for _ in 0 .. 100 {
 		if server.get_stats().requests_active >= 1 {
 			saw_active = true
 			break

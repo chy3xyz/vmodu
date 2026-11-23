@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- HTTP `max_connections`: reserve active slot under lock before `spawn` (fixes CI flake in `test_max_connections_rejects`).
+
 ### Changed
 - Best practices expanded for v0.2.0: EN+ZH parity (`BEST_PRACTICES.md` / `.zh.md`) with env table, anti-patterns, graceful shutdown, HTTP/SQL/JWT/Raft/observability samples; linked from root README and `docs/README`.
+- Docs hygiene: `SECURITY` support matrix → 0.2.x; `quickstart.zh` aligned with EN env table; checklist marks `v0.2.0` Release + Private vuln reporting done; CONTRIBUTING/quickstart recommend `trace` + `config` tests.
 
 ## [0.2.0] - 2026-11-23
 

@@ -6,7 +6,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| `main` / 0.1.x | Yes (actively fixed) |
+| `main` / 0.2.x | Yes (actively fixed) |
+| 0.1.x tags | Best-effort |
 | Older archived tags | Best-effort |
 
 Experimental modules (WASM simulation, some chain adapters, LLM) are **not** part of the security boundary for the default production path.
