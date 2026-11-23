@@ -8,7 +8,7 @@
 
 补充：
 
-- Actor / 容器约定：[最佳实践](../vmodu/BEST_PRACTICES.md)
+- Actor / 容器 / HTTP / SQL：[最佳实践（中文）](../vmodu/BEST_PRACTICES.zh.md) · [English](../vmodu/BEST_PRACTICES.md)
 - HTTP：`vmodu/infra/http/`
 - veb 适配：`vmodu/adapter/veb_adapter/`
 - Raft Transport：`vmodu/cluster/raft/raft.v`

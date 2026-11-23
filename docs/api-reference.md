@@ -8,7 +8,7 @@ Authoritative module docs and examples live next to the code:
 
 Also useful:
 
-- Actor / container conventions: [Best practices](../vmodu/BEST_PRACTICES.md)
+- Actor / container / HTTP / SQL conventions: [Best practices](../vmodu/BEST_PRACTICES.md) · [ZH](../vmodu/BEST_PRACTICES.zh.md)
 - HTTP server: `vmodu/infra/http/`
 - veb adapter: `vmodu/adapter/veb_adapter/`
 - Raft Transport: `vmodu/cluster/raft/raft.v`

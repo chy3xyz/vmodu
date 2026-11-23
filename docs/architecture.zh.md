@@ -23,4 +23,4 @@ VModu 采用 **模块化单体 (Modulith)** + **Actor** + **事件驱动**。
 ## 相关文档
 
 - [API 参考](api-reference.zh.md) · [部署](../deploy/README.zh.md)
-- [最佳实践](../vmodu/BEST_PRACTICES.md)
+- [最佳实践（中文）](../vmodu/BEST_PRACTICES.zh.md) · [English](../vmodu/BEST_PRACTICES.md)

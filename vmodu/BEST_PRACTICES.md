@@ -1,683 +1,242 @@
-# VModulith Runtime 最佳实践指南
+# VModu best practices
 
-## 1. 项目结构最佳实践
+**中文版：** [BEST_PRACTICES.zh.md](BEST_PRACTICES.zh.md)
 
-### 推荐目录结构
+Target: **V 0.5.2+** and VModu **0.2.0+**. Prefer patterns that match the default entry (`main.v`) and the module status table in the root [README](../README.md). Experimental modules (WASM, chain adapters, payment stubs) are called out explicitly—do not treat them as production defaults.
+
+---
+
+## 1. Project layout
 
 ```
-my_project/
-├── v.mod                      # V 模块定义
-├── main.v                     # 应用入口
-├── config/
-│   └── config.json            # 配置文件
-├── src/
-│   ├── modules/               # 业务模块
-│   │   ├── user/
-│   │   │   ├── user.v         # 模块定义
-│   │   │   ├── user_test.v    # 单元测试
-│   │   │   └── handler.v      # 事件处理器
-│   │   └── order/
-│   ├── services/              # 服务层
-│   └── models/                # 数据模型
+myapp/
+├── v.mod
+├── main.v                 # wire container + HTTP + health/metrics
+├── config/                # optional JSON; prefer VMODU_* env for runtime
+├── src/ or package dirs   # business modules
 └── docs/
 ```
 
-### v.mod 模板
+`v.mod` should declare a real dependency on this repo once published to your module path; for local work, use a path replace or `v` module search path.
 
-```v
-Module {
-    name: 'my_project'
-    description: 'My VModulith Application'
-    version: '0.1.0'
-    license: 'MIT'
-    dependencies: [
-        'vmodu'
-    ]
-}
-```
+Keep business logic in modules that implement `core.Module`. Put process wiring (ports, middleware, signal handlers) in `main.v` so tests can import packages without starting a full server.
 
 ---
 
-## 2. 模块开发最佳实践
+## 2. Modules and errors
 
-### Module 接口实现
+Implement `vmodu.core.Module` (`init` / `start` / `stop`). Prefer embedding `core.BaseModule` for name/version helpers.
 
 ```v
-// 推荐：完整实现 Module 接口
-module user
-
-import vmodu.event.bus
 import vmodu.core
+import vmodu.event.bus
 
 pub struct UserModule {
-    core.BaseModule
+	core.BaseModule
 mut:
-    users map[string]User
-    bus   &bus.EventBus
+	bus &bus.EventBus = unsafe { nil }
 }
 
-// 必须实现 Module 接口的方法
 pub fn (mut m UserModule) init(event_bus &bus.EventBus) ! {
-    m.bus = event_bus
-    // 订阅相关事件
-    m.bus.subscribe('user.register', m.on_user_register)
+	m.bus = event_bus
 }
 
-pub fn (mut m UserModule) start() ! {
-    // 启动模块服务
-}
-
-pub fn (mut m UserModule) stop() ! {
-    // 清理资源
-    m.users.clear()
-}
-
-// 业务方法
-pub fn (mut m UserModule) create_user(name string, email string) !User {
-    user := User{
-        id: generate_id()
-        name: name
-        email: email
-    }
-    m.users[user.id] = user
-    
-    // 发布事件
-    m.bus.publish(bus.Event{
-        topic: 'user.created'
-        data: user
-    })
-    
-    return user
-}
-
-fn (mut m UserModule) on_user_register(event bus.Event) {
-    // 处理事件
-}
+pub fn (mut m UserModule) start() ! {}
+pub fn (mut m UserModule) stop() ! {}
 ```
 
-### 错误处理最佳实践
-
-```v
-// 推荐：使用 Result 类型和错误传播
-pub fn (mut s Service) process_order(order_id string) !Order {
-    // 验证订单
-    order := s.find_order(order_id) or {
-        return error('Order not found: ${order_id}')
-    }
-    
-    // 检查库存
-    s.check_inventory(order) or {
-        return error('Inventory check failed: ${err}')
-    }
-    
-    // 处理支付
-    s.process_payment(order)!
-    
-    return order
-}
-
-// 调用方处理
-fn main() {
-    order := service.process_order('123') or {
-        println('Failed to process: ${err}')
-        return
-    }
-    println('Order processed: ${order.id}')
-}
-```
+Propagate errors with `!` / `or { return error('…: ${err}') }`. Do not swallow failures in `start`/`stop` without logging. Register modules on the container in dependency order: infra first, then domain, then HTTP route owners.
 
 ---
 
-## 3. Actor 并发最佳实践
+## 3. Actors
 
-### Actor 设计原则
-
-```v
-// 推荐：每个 Actor 负责单一职责
-module order_actor
-
-import vmodu.runtime
-
-// 定义消息类型
-pub struct CreateOrderMsg {
-    runtime.BaseMessage
-    user_id string
-    items   []Item
-}
-
-pub struct OrderActor {
-    id string
-mut:
-    orders map[string]Order
-}
-
-// 创建 Actor
-pub fn new_order_actor(id string) &runtime.Actor {
-    mut actor := runtime.new_actor(runtime.ActorConfig{
-        id: id
-        mailbox_size: 1000
-    })
-    
-    actor.start(fn (msg runtime.Message) {
-        match msg {
-            CreateOrderMsg {
-                handle_create_order(msg)
-            }
-            CancelOrderMsg {
-                handle_cancel_order(msg)
-            }
-            else {
-                println('Unknown message type')
-            }
-        }
-    })
-    
-    return actor
-}
-```
-
-### 避免共享状态
-
-```v
-// 不推荐：共享可变状态
-mut shared_data := map[string]int{}
-
-spawn fn [mut shared_data] () {
-    shared_data['key'] = 1  // 数据竞争！
-}()
-
-// 推荐：通过消息传递
-actor.send(UpdateMsg{key: 'key', value: 1})
-```
+- One responsibility per actor; communicate with messages (`runtime.BaseMessage`), not shared `mut` maps across threads.
+- Size mailboxes explicitly; supervise restarts via `runtime` supervisor APIs when you need fault isolation.
+- Prefer bounded queues and back-pressure over unbounded growth.
+- See root README Actor sample for `new_actor` / `start` / `send` shape.
 
 ---
 
-## 4. 事件驱动架构最佳实践
+## 4. Events
 
-### 事件定义
-
-```v
-// events.v - 集中定义所有事件
-module events
-
-import vmodu.event.bus
-
-// 用户事件
-pub struct UserCreatedEvent {
-    user_id string
-    email   string
-}
-
-pub struct UserDeletedEvent {
-    user_id string
-}
-
-// 订单事件
-pub struct OrderPlacedEvent {
-    order_id string
-    user_id  string
-    amount   f64
-}
-
-// 事件发布辅助函数
-pub fn publish_user_created(mut bus bus.EventBus, user User) {
-    bus.publish(bus.Event{
-        topic: 'user.created'
-        data:  UserCreatedEvent{
-            user_id: user.id
-            email:   user.email
-        }
-    })
-}
-```
-
-### 事件订阅模式
-
-```v
-// 推荐：按业务域组织事件处理器
-module notification_service
-
-import vmodu.event.bus
-
-pub struct NotificationService {
-mut:
-    bus &bus.EventBus
-}
-
-pub fn (mut s NotificationService) subscribe_events() {
-    // 用户事件
-    s.bus.subscribe('user.created', s.on_user_created)
-    s.bus.subscribe('user.deleted', s.on_user_deleted)
-    
-    // 订单事件
-    s.bus.subscribe('order.placed', s.on_order_placed)
-    s.bus.subscribe('order.completed', s.on_order_completed)
-}
-
-fn (s &NotificationService) on_user_created(event bus.Event) {
-    // 发送欢迎邮件
-}
-
-fn (s &NotificationService) on_order_placed(event bus.Event) {
-    // 发送订单确认
-}
-```
+- Define topics and payload structs in one place.
+- Subscribe in `Module.init` (or `start`); unsubscribe/cleanup in `stop` if the bus retains handlers.
+- Keep handlers fast—offload heavy work to actors or a worker pool.
+- Do not use the bus as a request/response RPC substitute; treat it as fire-and-forget or async fan-out.
 
 ---
 
-## 5. 区块链集成最佳实践
+## 5. HTTP (default production path)
 
-### 多链支持模式
+Use `vmodu.infra.http` for the default stack.
 
-```v
-// blockchain/client.v
-module blockchain
-
-import vmodu.adapters.evm
-import vmodu.adapters.solana
-
-// 统一接口
-pub interface ChainClient {
-    get_balance(address string) string
-    send_transaction(tx Transaction) !string
-    is_connected() bool
-}
-
-// EVM 客户端包装
-pub struct EvmClient {
-    adapter evm.EvmAdapter
-}
-
-pub fn (c &EvmClient) get_balance(address string) string {
-    return c.adapter.get_balance(address)
-}
-
-// Solana 客户端包装
-pub struct SolanaClient {
-    adapter solana.SolanaAdapter
-}
-
-pub fn (c &SolanaClient) get_balance(address string) string {
-    lamports := c.adapter.get_balance(address)
-    return solana.lamports_to_sol(lamports).str()
-}
-
-// 工厂函数
-pub fn new_client(chain_type string, rpc_url string) !ChainClient {
-    match chain_type {
-        'ethereum', 'polygon', 'bsc' {
-            return EvmClient{evm.new_adapter(rpc_url)}
-        }
-        'solana' {
-            return SolanaClient{solana.new_adapter(rpc_url)}
-        }
-        else {
-            return error('Unsupported chain: ${chain_type}')
-        }
-    }
-}
-```
-
-### 交易重试机制
+| Concern | Practice |
+|---------|----------|
+| Bind address | `VMODU_HTTP_HOST` / `VMODU_HTTP_PORT` via `config.load_runtime_config()` |
+| Connection cap | Set `max_connections` (default 1024); over limit → 503 |
+| Rate limits | Global `rate_limit_rps` + per-IP `rate_limit_per_ip` |
+| Identity | Propagate `X-Request-ID`; responses echo it |
+| Tracing | `http.trace_middleware(tracer)`; enable export with `VMODU_TRACE=1` or `console` |
+| Access logs | JSON lines when `access_log` / `VMODU_ACCESS_LOG` is on |
+| TLS | Terminate at reverse proxy; app HTTP is plaintext by design |
+| Liveness | `/health` cheap; `/health/deep` for component aggregation |
+| Metrics | `/metrics` Prometheus text; track 429s via `rate_limited_total` |
+| Shutdown | Handle `SIGINT`/`SIGTERM`; stop accepting, drain, then `Module.stop` (see `main.v`) |
 
 ```v
-import vmodu.infra.circuit
+import vmodu.config { load_runtime_config }
+import vmodu.infra.http
+import vmodu.infra.trace
 
-pub fn send_with_retry(cb &circuit.CircuitBreaker, tx Transaction) !string {
-    mut attempts := 0
-    max_attempts := 3
-    
-    for attempts < max_attempts {
-        attempts++
-        
-        result := cb.execute(fn [tx] () !string {
-            return adapter.send_transaction(tx)
-        }) or {
-            if attempts >= max_attempts {
-                return error('Max retry exceeded: ${err}')
-            }
-            // 指数退避
-            time.sleep(time.second * attempts)
-            continue
-        }
-        
-        return result
-    }
-    
-    return error('Should not reach here')
-}
+rt := load_runtime_config()
+mut server := http.new_server(http.ServerConfig{
+	host:                rt.http_host
+	port:                rt.http_port
+	max_connections:     rt.max_connections
+	rate_limit_rps:      rt.rate_limit_rps
+	rate_limit_burst:    rt.rate_limit_burst
+	rate_limit_per_ip:   rt.rate_limit_per_ip
+	ip_rate_limit_rps:   rt.ip_rate_limit_rps
+	ip_rate_limit_burst: rt.ip_rate_limit_burst
+	access_log:          rt.access_log
+})
+server.use(http.trace_middleware(trace.new_tracer('myapp', trace.new_noop_exporter())))
 ```
+
+Do not enable globals unless a third-party path truly requires `-enable-globals`. Put reverse-proxy timeouts above app idle timeouts so clients see clean 502/504 instead of hung sockets.
 
 ---
 
-## 6. Agent AI 集成最佳实践
+## 6. SQL and data
 
-### Tool 开发规范
-
-```v
-// tools/calculator_tool.v
-module tools
-
-import vmodu.agent.tool
-import json
-
-// 定义输入输出结构
-pub struct CalculatorInput {
-    operation string // add, subtract, multiply, divide
-    a         f64
-    b         f64
-}
-
-pub struct CalculatorOutput {
-    result f64
-    error  ?string
-}
-
-// 实现 Tool 接口
-pub struct CalculatorTool {
-    tool.BaseTool
-}
-
-pub fn new_calculator_tool() CalculatorTool {
-    return CalculatorTool{
-        BaseTool: tool.BaseTool{
-            tool_name:        'calculator'
-            tool_description: 'Perform basic arithmetic operations'
-        }
-    }
-}
-
-pub fn (t &CalculatorTool) run(input string) string {
-    // 解析输入
-    req := json.decode(CalculatorInput, input) or {
-        return json.encode(CalculatorOutput{
-            error: 'Invalid input: ${err}'
-        })
-    }
-    
-    // 执行计算
-    mut result := f64(0)
-    match req.operation {
-        'add'      { result = req.a + req.b }
-        'subtract' { result = req.a - req.b }
-        'multiply' { result = req.a * req.b }
-        'divide'   { 
-            if req.b == 0 {
-                return json.encode(CalculatorOutput{
-                    error: 'Division by zero'
-                })
-            }
-            result = req.a / req.b 
-        }
-        else {
-            return json.encode(CalculatorOutput{
-                error: 'Unknown operation: ${req.operation}'
-            })
-        }
-    }
-    
-    // 返回结果
-    return json.encode(CalculatorOutput{
-        result: result
-    })
-}
-```
-
-### Agent 配置模式
+- Prefer `Pool.exec_params` / `query_params` (and `Tx` via `Pool.begin`) for any untrusted values.
+- Identifiers (table/column) must be safe; Repository already validates simple idents and binds values with `?` (PostgreSQL rewrites to `$n`).
+- Use transactions for multi-statement writes; always `commit` or `rollback`.
+- Raw `execute` / `query` are for trusted DDL/admin only.
+- SQLite is the well-tested default; MySQL/PG params are supported but validate against your driver install in CI.
 
 ```v
-// agent/setup.v
-module agent
-
-import vmodu.agent.planner
-import vmodu.agent.tool
-
-pub fn setup_agent() planner.Planner {
-    mut planner := planner.new_planner()
-    
-    // 注册工具
-    planner.register_tool(tools.new_calculator_tool())
-    planner.register_tool(tools.new_web_search_tool())
-    planner.register_tool(tools.new_blockchain_tool())
-    
-    // 配置 LLM
-    planner.set_llm_config(planner.LlmConfig{
-        model:       'gpt-4'
-        temperature: 0.7
-        max_tokens:  2000
-    })
-    
-    return planner
-}
+mut tx := pool.begin()!
+tx.exec_params('INSERT INTO items (id, name) VALUES (?, ?)', [id, name])!
+tx.commit()!
 ```
+
+On failure paths, `rollback` before returning. Keep connection pools small in tests (`max_connections: 1` + shared `:memory:` or a temp file).
 
 ---
 
-## 7. 测试最佳实践
+## 7. Auth (JWT)
 
-### 单元测试模板
-
-```v
-// user_test.v
-module user
-
-fn test_create_user() {
-    mut module := new_user_module()
-    module.init(bus.default())!
-    
-    user := module.create_user('John', 'john@example.com')!
-    
-    assert user.name == 'John'
-    assert user.email == 'john@example.com'
-    assert user.id != ''
-}
-
-fn test_create_user_duplicate_email() {
-    mut module := new_user_module()
-    module.init(bus.default())!
-    
-    module.create_user('John', 'john@example.com')!
-    
-    // 应该失败
-    module.create_user('Jane', 'john@example.com') or {
-        assert err.msg().contains('duplicate')
-        return
-    }
-    assert false, 'Should have failed'
-}
-```
-
-### 集成测试
-
-```v
-// integration_test.v
-module main
-
-import vmodu.core
-
-fn test_full_workflow() {
-    // 创建容器
-    mut container := core.new_container()
-    
-    // 注册所有模块
-    container.register('user', user.new_module())!
-    container.register('order', order.new_module())!
-    container.register('payment', payment.new_module())!
-    
-    // 启动
-    container.start()!
-    
-    // 执行业务流程
-    mut user_mod := container.get('user')! as user.UserModule
-    user := user_mod.create_user('Test', 'test@test.com')!
-    
-    // 验证
-    assert user.id != ''
-    
-    // 清理
-    container.stop()!
-}
-```
+- Secrets must be **≥ 16 characters** (`auth.min_jwt_secret_len`); load from env, never commit.
+- Verification uses constant-time compare; keep HS256 unless you add a reviewed RS256 path.
+- Short TTL for access tokens; rotate secrets operationally (app does not rotate yet).
+- Reject empty/short secrets at process start, not only at first request.
 
 ---
 
-## 8. 性能优化最佳实践
+## 8. Raft (when you need consensus)
 
-### 连接池配置
-
-```v
-import vmodu.infra.pool
-
-pub fn create_optimized_pool() pool.Pool {
-    return pool.new_pool(pool.PoolConfig{
-        max_size:        20
-        min_idle:        5
-        max_lifetime:    30 * time.minute
-        idle_timeout:    10 * time.minute
-        health_check_interval: 1 * time.minute
-    })
-}
-```
-
-### Actor 池化
-
-```v
-// 推荐：Actor 池模式
-pub struct ActorPool {
-    actors []&runtime.Actor
-    index  int
-}
-
-pub fn (mut p ActorPool) next() &runtime.Actor {
-    actor := p.actors[p.index]
-    p.index = (p.index + 1) % p.actors.len
-    return actor
-}
-
-// 使用
-mut pool := ActorPool{
-    actors: [
-        new_worker_actor('worker-1'),
-        new_worker_actor('worker-2'),
-        new_worker_actor('worker-3'),
-    ]
-}
-
-pool.next().send(msg)
-```
+- Inject a real `Transport` (`set_transport`); default `NilTransport` refuses fake success.
+- Persist with `FileStorage` or append-only `WalStorage` (`set_storage` + `load_persistent` before `start`).
+- Prefer `WalFsyncMode.every_write` in production; use `.none` only for local benchmarks.
+- Call `compact_log` / `install_snapshot` to bound log growth; this is not a full streaming snapshot protocol.
+- Multi-node membership / production ops still need your own deployment playbook.
+- Never run consensus on ephemeral disks without a recovery story.
 
 ---
 
-## 9. 安全配置最佳实践
+## 9. Observability
 
-### WASM 沙箱限制
-
-```v
-import vmodu.wasm.sandbox
-
-pub fn create_secure_sandbox() sandbox.WasmSandbox {
-    mut s := sandbox.new_sandbox()
-    
-    // 严格资源限制
-    s.with_limits(
-        memory: 16 * 1024 * 1024,  // 16MB
-        cpu_ms: 5000                 // 5秒
-    )
-    
-    return s
-}
-```
-
-### API 密钥管理
-
-```v
-import os
-import vmodu.config
-
-pub fn load_secrets() config.Config {
-    mut loader := config.new_loader()
-    
-    // 优先从环境变量加载
-    loader.load_env('VMODU_')
-    
-    // 本地开发时从文件加载
-    if os.exists('.env.local') {
-        loader.load_file('.env.local')!
-    }
-    
-    return loader
-}
-
-// 使用
-config := load_secrets()
-api_key := config.get_string('api_key') // 从 VMODU_API_KEY 环境变量
-```
+- Register `health.Checker` components that reflect real dependencies (DB ping, disk, upstream).
+- Expose `/health` (liveness) and `/health/deep` (aggregated status → 503 when unhealthy).
+- Export Prometheus metrics; include rate-limit counters if you care about client abuse.
+- Structured access logs + optional console spans (`VMODU_TRACE`) are enough for a first production tier; full OpenTelemetry OTLP export is future work.
+- Correlate logs with `X-Request-ID` when debugging a single client path.
 
 ---
 
-## 10. 监控和可观测性
+## 10. Testing
 
-### 健康检查端点
+Prefer focused package tests (same as CI):
 
-```v
-import vmodu.infra.health
-import vmodu.infra.ws
-
-pub fn setup_health_checks() health.Checker {
-    mut checker := health.new_checker()
-    
-    // 数据库健康检查
-    checker.register('database', fn () health.Status {
-        if db.ping() {
-            return .healthy
-        }
-        return .unhealthy
-    })
-    
-    // 区块链连接检查
-    checker.register('blockchain', fn () health.Status {
-        if evm_adapter.is_connected() {
-            return .healthy
-        }
-        return .unhealthy
-    })
-    
-    return checker
-}
+```bash
+v test vmodu/infra/http
+v test vmodu/infra/db/sql
+v test vmodu/infra/auth
+v test vmodu/cluster/raft
+v test vmodu/infra/trace
+v test vmodu/config
 ```
 
-### 指标收集
-
-```v
-import vmodu.infra.metrics
-
-// 定义指标
-mut request_counter := metrics.new_counter('app_requests_total', ['method', 'path'])
-mut request_latency := metrics.new_histogram('app_request_duration_seconds', ['method'])
-
-// 使用
-fn handle_request(req Request) Response {
-    start := time.now()
-    
-    request_counter.inc(labels: {'method': req.method, 'path': req.path})
-    
-    response := process(req)
-    
-    duration := time.since(start).seconds()
-    request_latency.observe(duration, labels: {'method': req.method})
-    
-    return response
-}
-```
+- Avoid whole-tree `v test .` (multiple mains / optional deps).
+- For HTTP tests, set `access_log: false` to keep output quiet.
+- Use temp files / `:memory:` SQLite with `max_connections: 1` when schema must be shared.
+- After changing rate limits or Raft storage, add a regression that fails without the fix.
 
 ---
 
-## 总结
+## 11. Security and experimental modules
 
-遵循这些最佳实践可以确保你的 VModulith 应用：
+| Area | Do |
+|------|----|
+| Secrets | `VMODU_JWT_SECRET` and DB passwords only via env / secret store |
+| WASM | Require `VVMODU_WASM_SIMULATE=1` or `execute_simulated`; not a real runtime |
+| EVM / Solana / payment / external MQ / RPC gateway | Treat as **experimental**; isolate behind feature flags |
+| Deploy | Run `bash deploy/scripts/compose-smoke.sh`; rotate `deploy/.env.example` values before `up` |
+| Surface area | Do not expose experimental routes on the public listener |
 
-1. **模块化**：清晰的模块边界和依赖关系
-2. **可测试**：易于编写单元测试和集成测试
-3. **可扩展**：通过 Actor 和事件驱动实现水平扩展
-4. **可靠**：熔断器、重试、健康检查保障稳定性
-5. **安全**：WASM 沙箱、资源限制保护系统
+---
+
+## 12. Configuration
+
+Use `config.load_runtime_config()` for process knobs. Full table lives in [docs/quickstart.md](../docs/quickstart.md); common keys:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `VMODU_HTTP_HOST` | `0.0.0.0` | Bind address |
+| `VMODU_HTTP_PORT` | `8080` | Listen port |
+| `VMODU_MAX_CONNECTIONS` | `1024` | Max concurrent connections |
+| `VMODU_RATE_LIMIT_RPS` | `1000` | Global rate limit (req/s) |
+| `VMODU_RATE_LIMIT_BURST` | `200` | Global burst |
+| `VMODU_IP_RATE_LIMIT_RPS` | `100` | Per-IP rate limit |
+| `VMODU_IP_RATE_LIMIT_BURST` | `50` | Per-IP burst |
+| `VMODU_RATE_LIMIT_PER_IP` | `true` | Enable per-IP buckets |
+| `VMODU_ACCESS_LOG` | `true` | JSON access log lines |
+| `VMODU_TRACE` | `false` | `true`/`console` → console span export |
+
+Do not invent a second config system for the same knobs. File-based `config.hot_reload` is optional for app-specific JSON—not a replacement for `VMODU_*` process env.
+
+---
+
+## 13. Anti-patterns
+
+| Avoid | Prefer |
+|-------|--------|
+| String-building SQL with user input | `exec_params` / `query_params` |
+| Relying on `NilTransport` “success” | Real `Transport` + durable storage |
+| Shipping WASM / payment / chain adapters on by default | Feature flags + experimental label |
+| `v test .` as the only CI gate | Per-package tests matching GitHub Actions |
+| Secrets in repo or compose committed as live values | Env / secret store + rotate from `.env.example` |
+| One giant `main` with no modules | `core.Module` lifecycle + thin entry |
+
+---
+
+## Checklist before shipping
+
+- [ ] `/health` and `/health/deep` wired; deep checks cover real deps
+- [ ] Rate limits and `max_connections` set for expected traffic
+- [ ] JWT secret length ≥ 16; no secrets in git
+- [ ] SQL paths use bound params + transactions where needed
+- [ ] Raft nodes have Transport + durable storage if consensus matters
+- [ ] `SIGINT`/`SIGTERM` stops the process cleanly
+- [ ] CI package tests green; compose config smoke OK
+- [ ] Experimental modules not on the default request path
+
+---
+
+## Related docs
+
+- [Architecture](../docs/architecture.md) · [Quick start](../docs/quickstart.md) · [Release notes](../docs/RELEASE.md)
+- [Module guide](MODULES_GUIDE.md) (CN-heavy API notes)
+- [Deploy](../deploy/README.md) · [Security](../SECURITY.md) · [Open-source checklist](../docs/OPEN_SOURCE_CHECKLIST.md)

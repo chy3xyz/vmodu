@@ -47,7 +47,8 @@
 
 ## Optional
 
-- [ ] Full English pass on `MODULES_GUIDE` / `BEST_PRACTICES`
+- [x] Best practices refreshed for v0.2.0 (EN default + `.zh.md`); `MODULES_GUIDE` still CN-heavy
+- [ ] Full English pass on `MODULES_GUIDE`
 - [ ] Release tag + GitHub Release notes
 - [ ] Third-party NOTICE if non-MIT deps land
 

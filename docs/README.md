@@ -13,7 +13,7 @@ Anything under `archive/` is **outdated** by default.
 | [Architecture](architecture.md) | Modulith + Actor + EventBus |
 | [API reference](api-reference.md) | Points to module guide |
 | [Module guide](../vmodu/MODULES_GUIDE.md) | Per-module usage (CN-heavy today) |
-| [Best practices](../vmodu/BEST_PRACTICES.md) | V 0.5.x conventions |
+| [Best practices](../vmodu/BEST_PRACTICES.md) · [ZH](../vmodu/BEST_PRACTICES.zh.md) | V 0.5.2 / v0.2.0 production habits |
 | [Examples](examples/) | Sample apps |
 
 ## Deploy

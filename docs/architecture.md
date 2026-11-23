@@ -107,4 +107,4 @@ Raft `Transport` is wired for multi-node consensus experiments. See `vmodu/clust
 
 - [API reference](api-reference.md)
 - [Deploy](../deploy/README.md)
-- [Best practices](../vmodu/BEST_PRACTICES.md)
+- [Best practices](../vmodu/BEST_PRACTICES.md) · [ZH](../vmodu/BEST_PRACTICES.zh.md)

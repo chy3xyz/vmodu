@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- (none yet)
+### Changed
+- Best practices expanded for v0.2.0: EN+ZH parity (`BEST_PRACTICES.md` / `.zh.md`) with env table, anti-patterns, graceful shutdown, HTTP/SQL/JWT/Raft/observability samples; linked from root README and `docs/README`.
 
 ## [0.2.0] - 2026-11-23
 
