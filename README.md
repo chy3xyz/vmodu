@@ -135,7 +135,7 @@ We do **not** publish unverified RPS claims.
 | [deploy/README.md](deploy/README.md) | English |
 | [docs/archive/](docs/archive/) | Outdated historical material |
 
-Deep module notes (Chinese-heavy today): [`vmodu/MODULES_GUIDE.md`](vmodu/MODULES_GUIDE.md). Production habits for **v0.2.0**: [`vmodu/BEST_PRACTICES.md`](vmodu/BEST_PRACTICES.md) · [中文](vmodu/BEST_PRACTICES.zh.md).
+Module API (v0.2.0): [`vmodu/MODULES_GUIDE.md`](vmodu/MODULES_GUIDE.md) · [中文](vmodu/MODULES_GUIDE.zh.md). Production habits: [`vmodu/BEST_PRACTICES.md`](vmodu/BEST_PRACTICES.md) · [中文](vmodu/BEST_PRACTICES.zh.md).
 
 ## Support matrix
 

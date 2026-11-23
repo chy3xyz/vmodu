@@ -4,7 +4,7 @@
 
 完整模块说明与示例以源码旁文档为准：
 
-**→ [模块功能说明与使用指南](../vmodu/MODULES_GUIDE.md)**
+**→ [模块指南（中文）](../vmodu/MODULES_GUIDE.zh.md)** · [英文默认](../vmodu/MODULES_GUIDE.md)（对齐 v0.2.0）
 
 补充：
 

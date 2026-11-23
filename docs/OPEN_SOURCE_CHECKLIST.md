@@ -44,7 +44,7 @@
 
 ## Optional
 
-- [x] Best practices refreshed for v0.2.0 (EN default + `.zh.md`); `MODULES_GUIDE` still CN-heavy
-- [ ] Full English pass on `MODULES_GUIDE`
+- [x] Best practices refreshed for v0.2.0 (EN default + `.zh.md`)
+- [x] `MODULES_GUIDE` English-default + `.zh.md`, aligned with v0.2.0 APIs
 - [ ] Third-party NOTICE if non-MIT deps land
 

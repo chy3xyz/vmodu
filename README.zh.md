@@ -68,7 +68,7 @@ cd deploy && cp .env.example .env && docker compose up -d
 
 - 英文默认索引：[docs/README.md](docs/README.md)
 - 中文索引：[docs/README.zh.md](docs/README.zh.md)
-- [模块指南](vmodu/MODULES_GUIDE.md) · [最佳实践](vmodu/BEST_PRACTICES.zh.md)（[EN](vmodu/BEST_PRACTICES.md)）· [贡献](CONTRIBUTING.zh.md) · [安全](SECURITY.zh.md) · [MIT](LICENSE)
+- [模块指南](vmodu/MODULES_GUIDE.zh.md)（[EN](vmodu/MODULES_GUIDE.md)）· [最佳实践](vmodu/BEST_PRACTICES.zh.md)（[EN](vmodu/BEST_PRACTICES.md)）· [贡献](CONTRIBUTING.zh.md) · [安全](SECURITY.zh.md) · [MIT](LICENSE)
 
 ---
 

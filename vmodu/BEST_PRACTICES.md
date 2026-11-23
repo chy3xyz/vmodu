@@ -238,5 +238,5 @@ Do not invent a second config system for the same knobs. File-based `config.hot_
 ## Related docs
 
 - [Architecture](../docs/architecture.md) · [Quick start](../docs/quickstart.md) · [Release notes](../docs/RELEASE.md)
-- [Module guide](MODULES_GUIDE.md) (CN-heavy API notes)
+- [Module guide](MODULES_GUIDE.md) · [ZH](MODULES_GUIDE.zh.md)
 - [Deploy](../deploy/README.md) · [Security](../SECURITY.md) · [Open-source checklist](../docs/OPEN_SOURCE_CHECKLIST.md)

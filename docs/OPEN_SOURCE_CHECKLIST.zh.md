@@ -35,5 +35,5 @@
 ## 可选
 
 - [x] 最佳实践已按 v0.2.0 刷新（英文默认 + `.zh.md`）
-- [ ] `MODULES_GUIDE` 全文英文化
+- [x] `MODULES_GUIDE` 英文默认 + `.zh.md`，对齐 v0.2.0 API
 - [ ] 第三方 NOTICE（若有非 MIT）

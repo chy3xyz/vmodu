@@ -4,7 +4,7 @@
 
 Authoritative module docs and examples live next to the code:
 
-**→ [Module guide](../vmodu/MODULES_GUIDE.md)** (currently CN-heavy; English sections welcome via PR)
+**→ [Module guide](../vmodu/MODULES_GUIDE.md)** · [ZH](../vmodu/MODULES_GUIDE.zh.md) (v0.2.0 API)
 
 Also useful:
 

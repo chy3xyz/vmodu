@@ -238,5 +238,5 @@ v test vmodu/config
 ## 相关文档
 
 - [架构](../docs/architecture.zh.md) · [快速开始](../docs/quickstart.zh.md) · [发版说明](../docs/RELEASE.md)
-- [模块指南](MODULES_GUIDE.md)
+- [模块指南](MODULES_GUIDE.zh.md) · [英文](MODULES_GUIDE.md)
 - [部署](../deploy/README.zh.md) · [安全](../SECURITY.zh.md) · [开源清单](../docs/OPEN_SOURCE_CHECKLIST.zh.md)
