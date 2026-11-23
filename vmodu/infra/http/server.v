@@ -8,6 +8,7 @@ import net.http as net_http
 import json2
 import time
 import sync
+import rand
 
 // HandlerFunc is the HTTP handler function type
 pub type HandlerFunc = fn (Context) !Response
@@ -18,11 +19,13 @@ pub type Middleware = fn (HandlerFunc) HandlerFunc
 // Context holds request context
 pub struct Context {
 pub:
-	request    net_http.Request
-	params     map[string]string
-	method     string
-	path       string
-	start_time i64
+	request     net_http.Request
+	params      map[string]string
+	method      string
+	path        string
+	start_time  i64
+	request_id  string
+	client_ip   string
 mut:
 	response Response
 }
@@ -49,7 +52,7 @@ pub fn new_response() Response {
 // json returns JSON response
 pub fn (mut r Response) json(data any) {
 	r.headers['Content-Type'] = 'application/json'
-	r.body = json2.encode(data, escape_unicode: true, time_as_unix: true)
+	r.body = json2.encode(data, escape_unicode: true)
 }
 
 // text returns text response
@@ -70,43 +73,97 @@ pub:
 @[heap]
 pub struct Server {
 pub mut:
-	port            int
-	host            string
-	read_timeout    time.Duration = 30 * time.second
-	write_timeout   time.Duration = 30 * time.second
-	max_body_size   i64           = 10 * 1024 * 1024
-	routes          []Route
-	middlewares     []Middleware
-	is_running      bool
-	mu              sync.RwMutex
-	requests_total  u64
-	requests_active int
+	port             int
+	host             string
+	read_timeout     time.Duration = 30 * time.second
+	write_timeout    time.Duration = 30 * time.second
+	max_body_size    i64           = 10 * 1024 * 1024
+	max_connections  int           = 1024
+	stop_timeout_ms  int           = 5000
+	rate_limit_rps      int
+	rate_limit_burst    int
+	rate_limit_per_ip   bool
+	ip_rate_limit_rps   int
+	ip_rate_limit_burst int
+	access_log          bool // structured JSON access logs to stdout
+	routes              []Route
+	middlewares         []Middleware
+	is_running          bool
+	mu                  sync.RwMutex
+	requests_total      u64
+	requests_active     int
+	rate_limited_total  u64 // 429 responses (global + per-IP)
 mut:
-	listener &net.TcpListener = unsafe { nil }
+	listener         &net.TcpListener = unsafe { nil }
+	rate_limiter     &RateLimiter     = unsafe { nil }
+	ip_rate_limiter  &IpRateLimiter   = unsafe { nil }
 }
 
 // ServerConfig for server configuration
 pub struct ServerConfig {
 pub:
-	port          int    = 8080
-	host          string = '0.0.0.0'
-	read_timeout  int    = 30
-	write_timeout int    = 30
-	max_body_size i64    = 10 * 1024 * 1024
+	port                int    = 8080
+	host                string = '0.0.0.0'
+	read_timeout        int    = 30
+	write_timeout       int    = 30
+	max_body_size       i64    = 10 * 1024 * 1024
+	max_connections     int    = 1024
+	stop_timeout_ms     int    = 5000
+	rate_limit_rps      int // 0 = disabled (global)
+	rate_limit_burst    int // 0 => max(1, rate_limit_rps)
+	rate_limit_per_ip   bool // enable per-IP buckets
+	ip_rate_limit_rps   int  // 0 => reuse rate_limit_rps when per-IP on
+	ip_rate_limit_burst int  // 0 => reuse rate_limit_burst / rps
+	access_log          bool = true // JSON access log lines
 }
 
 // new_server creates a new HTTP server
 pub fn new_server(config ServerConfig) &Server {
-	return &Server{
-		port:          config.port
-		host:          config.host
-		read_timeout:  config.read_timeout * time.second
-		write_timeout: config.write_timeout * time.second
-		max_body_size: config.max_body_size
-		routes:        []
-		middlewares:   []
-		is_running:    false
+	burst := if config.rate_limit_burst > 0 {
+		config.rate_limit_burst
+	} else if config.rate_limit_rps > 0 {
+		config.rate_limit_rps
+	} else {
+		0
 	}
+	ip_rps := if config.ip_rate_limit_rps > 0 {
+		config.ip_rate_limit_rps
+	} else if config.rate_limit_per_ip {
+		config.rate_limit_rps
+	} else {
+		0
+	}
+	ip_burst := if config.ip_rate_limit_burst > 0 {
+		config.ip_rate_limit_burst
+	} else if ip_rps > 0 {
+		if burst > 0 { burst } else { ip_rps }
+	} else {
+		0
+	}
+	return &Server{
+		port:               config.port
+		host:               config.host
+		read_timeout:       config.read_timeout * time.second
+		write_timeout:      config.write_timeout * time.second
+		max_body_size:      config.max_body_size
+		max_connections:    config.max_connections
+		stop_timeout_ms:    config.stop_timeout_ms
+		rate_limit_rps:     config.rate_limit_rps
+		rate_limit_burst:   burst
+		rate_limit_per_ip:  config.rate_limit_per_ip
+		ip_rate_limit_rps:  ip_rps
+		ip_rate_limit_burst: ip_burst
+		access_log:         config.access_log
+		routes:             []
+		middlewares:        []
+		is_running:         false
+		rate_limiter:       new_rate_limiter(config.rate_limit_rps, burst)
+		ip_rate_limiter:    new_ip_rate_limiter(ip_rps, ip_burst, 10000)
+	}
+}
+
+fn new_request_id() string {
+	return '${time.now().unix_milli()}_${rand.intn(1_000_000) or { 0 }}'
 }
 
 // GET registers a GET route
@@ -153,15 +210,30 @@ pub fn (mut s Server) start() ! {
 	spawn s.accept_loop()
 }
 
-// stop stops the server
+// stop stops the server: close listener, then wait for in-flight requests or timeout
 pub fn (mut s Server) stop() ! {
 	s.mu.lock()
 	s.is_running = false
+	timeout_ms := s.stop_timeout_ms
 	s.mu.unlock()
 
 	if !isnil(s.listener) {
 		s.listener.close() or {}
 		s.listener = unsafe { nil }
+	}
+
+	deadline := time.now().unix_milli() + i64(timeout_ms)
+	for {
+		s.mu.rlock()
+		active := s.requests_active
+		s.mu.runlock()
+		if active == 0 {
+			break
+		}
+		if time.now().unix_milli() >= deadline {
+			break
+		}
+		time.sleep(10 * time.millisecond)
 	}
 	println('[HTTP] Server stopped')
 }
@@ -176,18 +248,20 @@ pub fn (s &Server) get_stats() ServerStats {
 	s.mu.rlock()
 	defer { s.mu.runlock() }
 	return ServerStats{
-		requests_total:  s.requests_total
-		requests_active: s.requests_active
-		is_running:      s.is_running
+		requests_total:     s.requests_total
+		requests_active:    s.requests_active
+		rate_limited_total: s.rate_limited_total
+		is_running:         s.is_running
 	}
 }
 
 // ServerStats contains server metrics
 pub struct ServerStats {
 pub:
-	requests_total  u64
-	requests_active int
-	is_running      bool
+	requests_total     u64
+	requests_active    int
+	rate_limited_total u64
+	is_running         bool
 }
 
 fn (mut s Server) accept_loop() {
@@ -212,6 +286,16 @@ fn (mut s Server) accept_loop() {
 			}
 			continue
 		}
+
+		s.mu.rlock()
+		over_limit := s.requests_active >= s.max_connections
+		s.mu.runlock()
+		if over_limit {
+			s.write_raw(mut conn, 503, 'text/plain', 'Service Unavailable')
+			conn.close() or {}
+			continue
+		}
+
 		spawn s.handle_connection(mut conn)
 	}
 }
@@ -249,29 +333,74 @@ fn (mut s Server) handle_connection(mut conn net.TcpConn) {
 	raw_target := parts[1]
 	path := normalize_path(raw_target)
 
+	peer := conn.peer_ip() or { 'unknown' }
+
+	req_id := headers['x-request-id'] or { '' }
+	request_id := if req_id.len > 0 { req_id } else { new_request_id() }
+	t0 := time.now().unix_milli()
+
+	if s.rate_limit_per_ip && s.ip_rate_limit_rps > 0 && !isnil(s.ip_rate_limiter) {
+		mut ip_lim := s.ip_rate_limiter
+		if !ip_lim.allow(peer) {
+			s.mu.lock()
+			s.rate_limited_total++
+			s.mu.unlock()
+			s.log_access(peer, method, path, request_id, 429, t0)
+			s.write_raw(mut conn, 429, 'text/plain', 'Too Many Requests')
+			return
+		}
+	}
+
+	if s.rate_limit_rps > 0 && !isnil(s.rate_limiter) {
+		mut lim := s.rate_limiter
+		if !lim.allow() {
+			s.mu.lock()
+			s.rate_limited_total++
+			s.mu.unlock()
+			s.log_access(peer, method, path, request_id, 429, t0)
+			s.write_raw(mut conn, 429, 'text/plain', 'Too Many Requests')
+			return
+		}
+	}
+
 	route, params := s.find_route(method, path)
 	if route.handler == unsafe { nil } {
+		s.log_access(peer, method, path, request_id, 404, time.now().unix_milli())
 		s.write_raw(mut conn, 404, 'application/json', '{"error":"not found"}')
 		return
 	}
 
+	start_ms := time.now().unix_milli()
 	req := net_http.new_request(net_http.method_from_str(method), path, body)
 	ctx := Context{
 		request:    req
 		params:     params
 		method:     method
 		path:       path
-		start_time: time.now().unix_milli()
+		start_time: start_ms
+		request_id: request_id
+		client_ip:  peer
 		response:   new_response()
 	}
 
 	handler := s.wrap_middlewares(route.handler)
-	resp := handler(ctx) or {
+	mut resp := handler(ctx) or {
+		s.log_access(peer, method, path, request_id, 500, start_ms)
 		s.write_raw(mut conn, 500, 'text/plain', 'Internal Server Error')
 		return
 	}
-	_ = headers
+	resp.headers['X-Request-ID'] = request_id
+	s.log_access(peer, method, path, request_id, resp.status_code, start_ms)
 	s.write_response(mut conn, resp)
+}
+
+fn (s &Server) log_access(ip string, method string, path string, request_id string, status int, start_ms i64) {
+	if !s.access_log {
+		return
+	}
+	dur := time.now().unix_milli() - start_ms
+	// Structured single-line JSON for log aggregators
+	println('{"msg":"access","request_id":"${request_id}","ip":"${ip}","method":"${method}","path":"${path}","status":${status},"duration_ms":${dur}}')
 }
 
 fn (s &Server) wrap_middlewares(handler HandlerFunc) HandlerFunc {
@@ -454,6 +583,7 @@ fn status_text(code int) string {
 		403 { 'Forbidden' }
 		404 { 'Not Found' }
 		405 { 'Method Not Allowed' }
+		429 { 'Too Many Requests' }
 		500 { 'Internal Server Error' }
 		502 { 'Bad Gateway' }
 		503 { 'Service Unavailable' }

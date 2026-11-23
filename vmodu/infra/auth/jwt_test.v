@@ -6,7 +6,7 @@ import time
 
 fn test_jwt_generate_verify_roundtrip() {
 	mgr := new_jwt_manager(JWTConfig{
-		secret:     'test-secret-key'
+		secret:     'test-secret-key-16'
 		issuer:     'vmodu-test'
 		audience:   'api'
 		access_ttl: 3600
@@ -34,9 +34,45 @@ fn test_jwt_generate_verify_roundtrip() {
 	assert payload.jti.len > 0
 }
 
+fn test_jwt_reject_empty_secret() {
+	mgr := new_jwt_manager(JWTConfig{
+		secret:     ''
+		access_ttl: 3600
+	})
+
+	mgr.generate('u1', [], []) or {
+		assert err.msg().contains('empty')
+		mgr.verify('a.b.c') or {
+			assert err.msg().contains('empty')
+			return
+		}
+		assert false, 'expected empty secret on verify'
+		return
+	}
+	assert false, 'expected empty secret on generate'
+}
+
+fn test_jwt_reject_short_secret() {
+	mgr := new_jwt_manager(JWTConfig{
+		secret:     'short-secret' // 12 chars < min_jwt_secret_len
+		access_ttl: 3600
+	})
+
+	mgr.generate('u1', [], []) or {
+		assert err.msg().contains('too short')
+		mgr.verify('a.b.c') or {
+			assert err.msg().contains('too short')
+			return
+		}
+		assert false, 'expected short secret on verify'
+		return
+	}
+	assert false, 'expected short secret on generate'
+}
+
 fn test_jwt_reject_bad_signature() {
 	mgr := new_jwt_manager(JWTConfig{
-		secret:     'correct-secret'
+		secret:     'correct-secret-16'
 		access_ttl: 3600
 	})
 
@@ -58,11 +94,11 @@ fn test_jwt_reject_bad_signature() {
 
 fn test_jwt_reject_wrong_secret() {
 	mgr_a := new_jwt_manager(JWTConfig{
-		secret:     'secret-a'
+		secret:     'secret-a-16chars!'
 		access_ttl: 3600
 	})
 	mgr_b := new_jwt_manager(JWTConfig{
-		secret:     'secret-b'
+		secret:     'secret-b-16chars!'
 		access_ttl: 3600
 	})
 
@@ -80,7 +116,7 @@ fn test_jwt_reject_wrong_secret() {
 
 fn test_jwt_reject_expired() {
 	mgr := new_jwt_manager(JWTConfig{
-		secret:     'test-secret'
+		secret:     'test-secret-16xx'
 		access_ttl: -10 // exp = now - 10 → already expired
 	})
 
@@ -98,7 +134,7 @@ fn test_jwt_reject_expired() {
 
 fn test_jwt_reject_invalid_format() {
 	mgr := new_jwt_manager(JWTConfig{
-		secret: 'test-secret'
+		secret: 'test-secret-16xx'
 	})
 
 	mgr.verify('not-a-jwt') or {
@@ -110,7 +146,7 @@ fn test_jwt_reject_invalid_format() {
 
 fn test_jwt_refresh() {
 	mgr := new_jwt_manager(JWTConfig{
-		secret:     'test-secret'
+		secret:     'test-secret-16xx'
 		access_ttl: 3600
 	})
 

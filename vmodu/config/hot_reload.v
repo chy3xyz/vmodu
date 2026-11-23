@@ -174,10 +174,10 @@ pub fn (mut m Manager) save() ! {
 	}
 
 	m.mu.rlock()
-	config := m.config
+	cfg := m.config
 	m.mu.runlock()
 
-	content := json2.encode(config,
+	content := json2.encode(cfg,
 		prettify:       true
 		legacy_layout:  true
 		escape_unicode: true

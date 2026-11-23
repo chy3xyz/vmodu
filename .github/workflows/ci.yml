@@ -64,3 +64,9 @@ jobs:
       - name: veb_adapter tests (best-effort)
         continue-on-error: true
         run: v test vmodu/adapter/veb_adapter
+
+      - name: Deploy compose smoke
+        continue-on-error: true
+        run: |
+          chmod +x deploy/scripts/compose-smoke.sh
+          deploy/scripts/compose-smoke.sh

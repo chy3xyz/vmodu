@@ -90,6 +90,16 @@ Defaults in the example compose (change before production):
 curl http://localhost:8080/health
 ```
 
+## Compose smoke (no containers)
+
+Validates `docker-compose.yml` + env interpolation without starting services.
+Safe when Docker is absent (prints `SKIP`, exits 0). Does not overwrite an existing `.env`.
+
+```bash
+cd deploy
+./scripts/compose-smoke.sh
+```
+
 ## Production checklist
 
 - [ ] Replace all default passwords / secrets

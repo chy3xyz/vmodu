@@ -1,5 +1,8 @@
 // payment.v - Payment Gateway Integration for VModulith
 // Supports: Alipay, WeChat Pay, Stripe, PayPal
+//
+// EXPERIMENTAL: Not a production payment gateway. Provider signing (e.g. Alipay RSA)
+// and live settlement paths are incomplete stubs — do not use as a default prod path.
 
 module payment
 

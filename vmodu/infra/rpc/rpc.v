@@ -1,5 +1,7 @@
 // rpc.v - RPC Gateway for external API access
 // Provides HTTP/gRPC interface to VModulith Runtime
+//
+// EXPERIMENTAL: Scaffold / gateway sketch — not a production HTTP/gRPC RPC surface.
 
 module rpc
 

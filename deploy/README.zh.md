@@ -16,6 +16,8 @@ docker compose -f docker-compose.prod.yml up -d   # 生产文件
 
 服务端口、环境变量、备份与监控命令与英文版相同，见 [README.md](README.md)。
 
+Compose 配置冒烟（不启动容器）：`cd deploy && ./scripts/compose-smoke.sh`。无 Docker 时打印 `SKIP` 并以 0 退出；不会覆盖已有 `.env`。
+
 Grafana 示例口令常见为 `admin/admin`——**上线前必须更换**。
 
 ## 生产检查清单

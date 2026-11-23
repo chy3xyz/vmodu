@@ -5,10 +5,14 @@ module auth
 
 import crypto.hmac
 import crypto.sha256
+import crypto.subtle
 import encoding.base64
 import json2
 import time
 import rand
+
+// Minimum HMAC secret length (bytes / UTF-8 string length).
+pub const min_jwt_secret_len = 16
 
 // JWT Token structure
 pub struct JWTToken {
@@ -59,15 +63,27 @@ pub:
 	config JWTConfig
 }
 
-// new_jwt_manager creates a new JWT manager
+// new_jwt_manager creates a new JWT manager.
+// Secret length is checked on generate/verify (not here) to avoid breaking call sites.
 pub fn new_jwt_manager(config JWTConfig) JWTManager {
 	return JWTManager{config: config}
 }
 
+fn (j &JWTManager) ensure_secret() ! {
+	if j.config.secret.len == 0 {
+		return error('JWT secret is empty')
+	}
+	if j.config.secret.len < min_jwt_secret_len {
+		return error('JWT secret too short (min ${min_jwt_secret_len})')
+	}
+}
+
 // generate creates a new JWT token
 pub fn (j &JWTManager) generate(user_id string, roles []string, permissions []string) !string {
+	j.ensure_secret()!
+
 	now := time.now().unix()
-	
+
 	header := JWTHeader{}
 	payload := JWTPayload{
 		iss: j.config.issuer
@@ -81,57 +97,59 @@ pub fn (j &JWTManager) generate(user_id string, roles []string, permissions []st
 		permissions: permissions
 		data: {}
 	}
-	
+
 	// Encode header and payload
 	header_json := json2.encode(header, escape_unicode: true, time_as_unix: true)
 	payload_json := json2.encode(payload, escape_unicode: true, time_as_unix: true)
-	
+
 	header_b64 := base64.url_encode(header_json.bytes())
 	payload_b64 := base64.url_encode(payload_json.bytes())
-	
+
 	// Create signature
 	signing_input := '${header_b64}.${payload_b64}'
 	signature := hmac.new(j.config.secret.bytes(), signing_input.bytes(), sha256.sum, sha256.block_size)
 	signature_b64 := base64.url_encode(signature)
-	
+
 	return '${header_b64}.${payload_b64}.${signature_b64}'
 }
 
 // verify validates a JWT token
 pub fn (j &JWTManager) verify(token string) !JWTPayload {
+	j.ensure_secret()!
+
 	parts := token.split('.')
 	if parts.len != 3 {
 		return error('invalid token format')
 	}
-	
+
 	header_b64 := parts[0]
 	payload_b64 := parts[1]
 	signature_b64 := parts[2]
-	
-	// Verify signature
+
+	// Verify signature (constant-time compare of decoded bytes)
 	signing_input := '${header_b64}.${payload_b64}'
 	expected_sig := hmac.new(j.config.secret.bytes(), signing_input.bytes(), sha256.sum, sha256.block_size)
-	expected_sig_b64 := base64.url_encode(expected_sig)
-	
-	if signature_b64 != expected_sig_b64 {
+	provided_sig := base64.url_decode(signature_b64)
+
+	if subtle.constant_time_compare(provided_sig, expected_sig) != 1 {
 		return error('invalid signature')
 	}
-	
+
 	// Decode payload
 	payload_json := base64.url_decode(payload_b64)
 	payload := json2.decode[JWTPayload](payload_json.bytestr())!
-	
+
 	// Check expiration
 	now := time.now().unix()
 	if payload.exp > 0 && payload.exp < now {
 		return error('token expired')
 	}
-	
+
 	// Check not before
 	if payload.nbf > now {
 		return error('token not yet valid')
 	}
-	
+
 	return payload
 }
 

@@ -96,12 +96,19 @@ Alternatively use `adapter/veb_adapter` (see `docs/examples/`).
 | `event/bus` | Event bus | ✅ |
 | `runtime` | Actor runtime | ✅ |
 | `adapter/veb_adapter` | veb HTTP adapter | ✅ |
-| `infra/http` | Native HTTP listen/accept | ✅ |
-| `infra/db/sql` | DB access | ✅ (per driver) |
+| `infra/http` | Native HTTP + limits + request-id/trace hooks | ✅ |
+| `infra/db/sql` | Pool + Tx + bound params (SQLite/MySQL/PG) | ✅ (per driver) |
 | `infra/cache/redis` | Redis | ✅ |
 | `infra/auth/jwt` | JWT | ✅ |
 | `infra/metrics` | `/metrics` on default entry | ✅ |
-| `cluster/raft` | Raft via `Transport` | ✅ |
+| `infra/trace` | Span hooks + console/noop exporters | ✅ |
+| `config` | `VMODU_*` runtime env loader | ✅ |
+| `cluster/raft` | Transport + FileStorage / WalStorage + compact/snapshot | ✅ |
+| `infra/payment` | Provider stubs; signing incomplete | ⚠️ experimental |
+| `infra/mq` | InMemory OK; Rabbit/Kafka stubs | ⚠️ experimental |
+| `infra/rpc` | RPC gateway scaffold | ⚠️ experimental |
+| `adapters/evm` | EVM chain adapter stub | ⚠️ experimental |
+| `adapters/solana` | Solana adapter stub | ⚠️ experimental |
 | `wasm/sandbox` | Needs `VVMODU_WASM_SIMULATE=1` or `execute_simulated` | ⚠️ experimental |
 | `wasm/wasmtime` | Stub — not a real wasmtime binding | ⚠️ experimental |
 | `agent/llm` | HTTP client; `decompose` tries json2 | ⚠️ |

@@ -216,7 +216,7 @@ fn (mut s Server) handle_connection(mut conn net.TcpConn) {
 fn (mut s Server) send_response(mut conn net.TcpConn, msg Message) {
 	conn.set_write_timeout(s.config.write_timeout_ms * time.millisecond)
 
-	resp_data := json2.encode(msg, escape_unicode: true, time_as_unix: true)
+	resp_data := json2.encode(msg, escape_unicode: true)
 	resp_bytes := resp_data.bytes()
 
 	// Write length prefix
@@ -323,7 +323,7 @@ pub fn (mut c Client) send(peer_id string, msg Message) !Response {
 	}
 
 	// Serialize message
-	msg_data := json2.encode(msg, escape_unicode: true, time_as_unix: true)
+	msg_data := json2.encode(msg, escape_unicode: true)
 	msg_bytes := msg_data.bytes()
 
 	// Write length prefix
@@ -422,7 +422,7 @@ pub fn new_append_entries_req(from string, to string, term int, req AppendEntrie
 		term:       term
 		from:       from
 		to:         to
-		payload:    json2.encode(req, escape_unicode: true, time_as_unix: true)
+		payload:    json2.encode(req, escape_unicode: true)
 		timestamp:  time.now().unix_milli()
 		request_id: generate_request_id()
 	}
@@ -434,7 +434,7 @@ pub fn new_append_entries_resp(from string, to string, term int, resp AppendEntr
 		term:       term
 		from:       from
 		to:         to
-		payload:    json2.encode(resp, escape_unicode: true, time_as_unix: true)
+		payload:    json2.encode(resp, escape_unicode: true)
 		timestamp:  time.now().unix_milli()
 		request_id: generate_request_id()
 	}
@@ -446,7 +446,7 @@ pub fn new_request_vote_req(from string, to string, term int, req RequestVoteReq
 		term:       term
 		from:       from
 		to:         to
-		payload:    json2.encode(req, escape_unicode: true, time_as_unix: true)
+		payload:    json2.encode(req, escape_unicode: true)
 		timestamp:  time.now().unix_milli()
 		request_id: generate_request_id()
 	}
@@ -458,7 +458,7 @@ pub fn new_request_vote_resp(from string, to string, term int, resp RequestVoteR
 		term:       term
 		from:       from
 		to:         to
-		payload:    json2.encode(resp, escape_unicode: true, time_as_unix: true)
+		payload:    json2.encode(resp, escape_unicode: true)
 		timestamp:  time.now().unix_milli()
 		request_id: generate_request_id()
 	}

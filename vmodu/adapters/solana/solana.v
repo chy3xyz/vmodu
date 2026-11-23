@@ -1,5 +1,7 @@
 // solana.v - Solana Adapter for Web3 interactions
 // Provides RPC client for Solana blockchain
+//
+// EXPERIMENTAL: Stub / scaffold — not production Solana connectivity or signing.
 
 module solana
 

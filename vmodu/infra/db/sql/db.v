@@ -155,11 +155,12 @@ pub fn (mut p Pool) close() {
 	}
 }
 
-// execute runs a SQL query (non-select)
+// execute runs a SQL statement without bound parameters.
+// Prefer exec_params / query_params for any untrusted values.
 pub fn (mut p Pool) execute(query_sql string) ! {
 	mut conn := p.acquire()!
 	defer { p.release(mut conn) }
-	
+
 	match p.config.db_type {
 		.sqlite {
 			if sqlite_db := conn.sqlite_conn {
@@ -179,11 +180,59 @@ pub fn (mut p Pool) execute(query_sql string) ! {
 	}
 }
 
-// query runs a SQL query and returns results
+// rewrite_qmarks_to_dollar converts `?` placeholders to `$1`, `$2`, … (PostgreSQL).
+fn rewrite_qmarks_to_dollar(query_sql string) string {
+	mut out := []u8{cap: query_sql.len + 8}
+	mut n := 0
+	for c in query_sql {
+		if c == `?` {
+			n++
+			out << `$`
+			for ch in '${n}'.bytes() {
+				out << ch
+			}
+		} else {
+			out << c
+		}
+	}
+	return out.bytestr()
+}
+
+// exec_params runs a statement with `?` placeholders (bound parameters).
+// PostgreSQL: `?` is rewritten to `$n` automatically.
+pub fn (mut p Pool) exec_params(query_sql string, params []string) ! {
+	mut conn := p.acquire()!
+	defer { p.release(mut conn) }
+
+	match p.config.db_type {
+		.sqlite {
+			if sqlite_db := conn.sqlite_conn {
+				sqlite_db.exec_param_many(query_sql, params)!
+				return
+			}
+		}
+		.mysql {
+			if mysql_db := conn.mysql_conn {
+				mysql_db.exec_param_many(query_sql, params)!
+				return
+			}
+		}
+		.postgresql {
+			if mut pg_db := conn.pg_conn {
+				q := rewrite_qmarks_to_dollar(query_sql)
+				pg_db.exec_param_many(q, params)!
+				return
+			}
+		}
+	}
+}
+
+// query runs a SQL query without bound parameters.
+// Prefer query_params for any untrusted values.
 pub fn (mut p Pool) query(query_sql string) ![]Row {
 	mut conn := p.acquire()!
 	defer { p.release(mut conn) }
-	
+
 	match p.config.db_type {
 		.sqlite {
 			if sqlite_db := conn.sqlite_conn {
@@ -204,7 +253,37 @@ pub fn (mut p Pool) query(query_sql string) ![]Row {
 			}
 		}
 	}
-	
+
+	return []
+}
+
+// query_params runs a query with `?` placeholders (bound parameters).
+// PostgreSQL: `?` is rewritten to `$n` automatically.
+pub fn (mut p Pool) query_params(query_sql string, params []string) ![]Row {
+	mut conn := p.acquire()!
+	defer { p.release(mut conn) }
+
+	match p.config.db_type {
+		.sqlite {
+			if sqlite_db := conn.sqlite_conn {
+				rows := sqlite_db.exec_param_many(query_sql, params)!
+				return sqlite_rows_to_rows(rows)
+			}
+		}
+		.mysql {
+			if mysql_db := conn.mysql_conn {
+				set := mysql_db.exec_param_many_result(query_sql, params)!
+				return mysql_rowset_to_rows(set)
+			}
+		}
+		.postgresql {
+			if mut pg_db := conn.pg_conn {
+				q := rewrite_qmarks_to_dollar(query_sql)
+				res := pg_db.exec_param_many_result(q, params)!
+				return pg_result_to_rows(res)
+			}
+		}
+	}
 	return []
 }
 
@@ -223,7 +302,7 @@ pub interface Model {
 	from_map(map[string]string)
 }
 
-// Repository provides CRUD operations
+// Repository provides CRUD operations (parameterized values; SQLite-first).
 pub struct Repository[T] {
 pub mut:
 	pool &Pool
@@ -234,84 +313,214 @@ pub fn new_repository[T](pool &Pool) Repository[T] {
 	return Repository[T]{pool: pool}
 }
 
-// find_by_id finds a record by primary key
-pub fn (r &Repository[T]) find_by_id(id string) !T {
+fn require_safe_ident(name string, kind string) ! {
+	if !is_safe_ident(name) {
+		return error('unsafe ${kind} identifier: ${name}')
+	}
+}
+
+fn is_safe_ident(s string) bool {
+	if s.len == 0 {
+		return false
+	}
+	for i, c in s {
+		ok := (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || c == `_`
+			|| (i > 0 && c >= `0` && c <= `9`)
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// find_by_id finds a record by primary key (id is bound, never interpolated).
+pub fn (mut r Repository[T]) find_by_id(id string) !T {
 	mut instance := T{}
 	table := instance.table_name()
 	pk := instance.primary_key()
-	
-	sql := 'SELECT * FROM ${table} WHERE ${pk} = \'${id}\''
-	rows := r.pool.query(sql)!
-	
+	require_safe_ident(table, 'table')!
+	require_safe_ident(pk, 'primary key')!
+
+	q := 'SELECT * FROM ${table} WHERE ${pk} = ?'
+	rows := r.pool.query_params(q, [id])!
+
 	if rows.len == 0 {
 		return error('record not found')
 	}
-	
+
 	instance.from_map(rows[0].values)
 	return instance
 }
 
 // find_all finds all records
-pub fn (r &Repository[T]) find_all() ![]T {
+pub fn (mut r Repository[T]) find_all() ![]T {
 	mut instance := T{}
 	table := instance.table_name()
-	
-	sql := 'SELECT * FROM ${table}'
-	rows := r.pool.query(sql)!
-	
+	require_safe_ident(table, 'table')!
+
+	q := 'SELECT * FROM ${table}'
+	rows := r.pool.query(q)!
+
 	mut results := []T{}
 	for row in rows {
 		mut item := T{}
 		item.from_map(row.values)
 		results << item
 	}
-	
+
 	return results
 }
 
-// save inserts or updates a record
-pub fn (r &Repository[T]) save(item T) ! {
+// save inserts a record (column values are bound parameters).
+pub fn (mut r Repository[T]) save(item T) ! {
 	data := item.to_map()
 	table := item.table_name()
-	pk := item.primary_key()
-	
+	require_safe_ident(table, 'table')!
+
 	mut columns := []string{}
-	mut values := []string{}
-	
+	mut placeholders := []string{}
+	mut params := []string{}
+
 	for key, value in data {
+		require_safe_ident(key, 'column')!
 		columns << key
-		values << '\'${value}\''
+		placeholders << '?'
+		params << value
 	}
-	
-	sql := 'INSERT INTO ${table} (${columns.join(', ')}) VALUES (${values.join(', ')})'
-	r.pool.execute(sql)!
+
+	if columns.len == 0 {
+		return error('save: empty row')
+	}
+
+	q := 'INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})'
+	r.pool.exec_params(q, params)!
 }
 
-// delete removes a record
-pub fn (r &Repository[T]) delete(id string) ! {
+// delete removes a record by primary key (id is bound).
+pub fn (mut r Repository[T]) delete(id string) ! {
 	mut instance := T{}
 	table := instance.table_name()
 	pk := instance.primary_key()
-	
-	sql := 'DELETE FROM ${table} WHERE ${pk} = \'${id}\''
-	r.pool.execute(sql)!
+	require_safe_ident(table, 'table')!
+	require_safe_ident(pk, 'primary key')!
+
+	q := 'DELETE FROM ${table} WHERE ${pk} = ?'
+	r.pool.exec_params(q, [id])!
 }
 
 // Helper functions to convert native results to Row format
 fn sqlite_rows_to_rows(sqlite_rows []sqlite.Row) []Row {
 	mut rows := []Row{}
-	// Implementation depends on sqlite.Row structure
+	for sr in sqlite_rows {
+		mut values := map[string]string{}
+		mut columns := []string{}
+		if sr.names.len > 0 {
+			columns = sr.names.clone()
+			for i, name in sr.names {
+				val := if i < sr.vals.len { sr.vals[i] } else { '' }
+				values[name] = val
+			}
+		} else {
+			for i, val in sr.vals {
+				col := 'col${i}'
+				columns << col
+				values[col] = val
+			}
+		}
+		rows << Row{
+			columns: columns
+			values:  values
+		}
+	}
 	return rows
 }
 
 fn mysql_result_to_rows(result mysql.Result) []Row {
+	// Legacy path via mysql.query; prefer exec_param_many + mysql_native_rows_to_rows
+	_ = result
+	return []
+}
+
+fn mysql_native_rows_to_rows(native []mysql.Row) []Row {
 	mut rows := []Row{}
-	// Implementation depends on mysql.Result structure
+	for nr in native {
+		mut values := map[string]string{}
+		mut columns := []string{}
+		for i, val in nr.vals {
+			col := 'col${i}'
+			columns << col
+			values[col] = val
+		}
+		rows << Row{
+			columns: columns
+			values:  values
+		}
+	}
+	return rows
+}
+
+fn mysql_rowset_to_rows(set mysql.RowSet) []Row {
+	mut rows := []Row{}
+	for nr in set.rows {
+		mut values := map[string]string{}
+		mut columns := []string{}
+		for i, val in nr.vals {
+			col := if i < set.names.len && set.names[i].len > 0 {
+				set.names[i]
+			} else {
+				'col${i}'
+			}
+			columns << col
+			values[col] = val
+		}
+		rows << Row{
+			columns: columns
+			values:  values
+		}
+	}
 	return rows
 }
 
 fn pg_rows_to_rows(pg_rows []pg.Row) []Row {
+	return pg_native_rows_to_rows(pg_rows)
+}
+
+fn pg_native_rows_to_rows(pg_rows []pg.Row) []Row {
 	mut rows := []Row{}
-	// Implementation depends on pg.Row structure
+	for nr in pg_rows {
+		mut values := map[string]string{}
+		mut columns := []string{}
+		for i, opt in nr.vals {
+			col := 'col${i}'
+			columns << col
+			values[col] = if v := opt { v } else { '' }
+		}
+		rows << Row{
+			columns: columns
+			values:  values
+		}
+	}
+	return rows
+}
+
+fn pg_result_to_rows(res pg.Result) []Row {
+	mut rows := []Row{}
+	for nr in res.rows {
+		mut values := map[string]string{}
+		mut columns := []string{}
+		for i, opt in nr.vals {
+			col := if i < res.names.len && res.names[i].len > 0 {
+				res.names[i]
+			} else {
+				'col${i}'
+			}
+			columns << col
+			values[col] = if v := opt { v } else { '' }
+		}
+		rows << Row{
+			columns: columns
+			values:  values
+		}
+	}
 	return rows
 }

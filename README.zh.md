@@ -48,12 +48,17 @@ cd deploy && cp .env.example .env && docker compose up -d
 | `event/bus` | 事件总线 | ✅ |
 | `runtime` | Actor 运行时 | ✅ |
 | `adapter/veb_adapter` | 基于 veb 的 HTTP 适配 | ✅ |
-| `infra/http` | 自研 HTTP；真实 `listen/accept` | ✅ |
-| `infra/db/sql` | 数据库访问 | ✅（按驱动验证） |
+| `infra/http` | 自研 HTTP + 连接/全局限流/按 IP 限流 | ✅ |
+| `infra/db/sql` | 连接池 + 事务 + 绑定参数（SQLite/MySQL/PG） | ✅（按驱动验证） |
 | `infra/cache/redis` | Redis 缓存 | ✅ |
 | `infra/auth/jwt` | JWT | ✅ |
 | `infra/metrics` | 默认入口 `/metrics` | ✅ |
-| `cluster/raft` | Raft；出站经 `Transport` | ✅ |
+| `cluster/raft` | Transport + FileStorage/WalStorage + compact/snapshot | ✅ |
+| `infra/payment` | 支付网关桩；签名未完成 | ⚠️ experimental |
+| `infra/mq` | InMemory 可用；Rabbit/Kafka 为桩 | ⚠️ experimental |
+| `infra/rpc` | RPC 网关脚手架 | ⚠️ experimental |
+| `adapters/evm` | EVM 链适配桩 | ⚠️ experimental |
+| `adapters/solana` | Solana 适配桩 | ⚠️ experimental |
 | `wasm/*` | 非生产 WASM 运行时 | ⚠️ experimental |
 | `agent/llm` | LLM 客户端 | ⚠️ |
 

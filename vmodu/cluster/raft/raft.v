@@ -97,29 +97,37 @@ pub mut:
 	log             []LogEntry
 	commit_index    int
 	last_applied    int
-	
+
+	// Snapshot (compacted prefix); log holds only entries with index > snapshot_index
+	snapshot_index  int
+	snapshot_term   int
+	snapshot_data   string
+
 	// Leader state
 	next_index      map[string]int
 	match_index     map[string]int
-	
+
 	// Election
 	votes_granted   int
-	
+
 	// Timers
 	election_timer  i64
 	heartbeat_timer i64
-	
+
 	// Channels
 	vote_ch         chan VoteResult
 	append_ch       chan AppendResult
-	
+
 	// Control
 	is_running      bool
 	mu              sync.RwMutex
-	
+
 	// Outbound RPC (rpc.Client implements Transport)
 	transport       Transport = NilTransport{}
-	
+
+	// Durable state (term / voted_for / log / snapshot); default NilStorage = memory only
+	storage         Storage   = NilStorage{}
+
 	// Callbacks
 	on_leader_elected ?fn ()
 	on_commit         ?fn (LogEntry)
@@ -180,6 +188,7 @@ pub fn new_node(id string, peers []string) &RaftNode {
 		vote_ch:      chan VoteResult{cap: 64}
 		append_ch:    chan AppendResult{cap: 64}
 		transport:    NilTransport{}
+		storage:      NilStorage{}
 	}
 }
 
@@ -188,6 +197,164 @@ pub fn (mut n RaftNode) set_transport(mut t Transport) {
 	n.mu.lock()
 	defer { n.mu.unlock() }
 	n.transport = t
+}
+
+// set_storage injects durable storage (call before start / load_persistent)
+pub fn (mut n RaftNode) set_storage(mut s Storage) {
+	n.mu.lock()
+	defer { n.mu.unlock() }
+	n.storage = s
+}
+
+// load_persistent restores term, voted_for, log, and snapshot from storage
+pub fn (mut n RaftNode) load_persistent() ! {
+	n.mu.lock()
+	defer { n.mu.unlock() }
+	state := n.storage.load()!
+	n.current_term = state.current_term
+	if state.voted_for.len > 0 {
+		n.voted_for = state.voted_for
+	} else {
+		n.voted_for = none
+	}
+	n.snapshot_index = state.snapshot_index
+	n.snapshot_term = state.snapshot_term
+	n.snapshot_data = state.snapshot_data
+	// Keep only entries after snapshot (defensive if older files were inconsistent)
+	mut kept := []LogEntry{}
+	for e in state.log {
+		if e.index > state.snapshot_index {
+			kept << e
+		}
+	}
+	n.log = kept
+}
+
+// persist_locked writes durable state; caller must hold n.mu
+fn (mut n RaftNode) persist_locked() {
+	voted := n.voted_for or { '' }
+	state := DurableState{
+		current_term:   n.current_term
+		voted_for:      voted
+		log:            n.log.clone()
+		snapshot_index: n.snapshot_index
+		snapshot_term:  n.snapshot_term
+		snapshot_data:  n.snapshot_data
+	}
+	n.storage.save(state) or {
+		eprintln('[Raft] persist failed for ${n.id}: ${err}')
+	}
+}
+
+// last_log_index returns the Raft index of the last log entry, or snapshot_index if log is empty.
+pub fn (n &RaftNode) last_log_index() int {
+	if n.log.len > 0 {
+		return n.log[n.log.len - 1].index
+	}
+	return n.snapshot_index
+}
+
+// last_log_term returns the term of the last log entry, or snapshot_term if log is empty.
+pub fn (n &RaftNode) last_log_term() int {
+	if n.log.len > 0 {
+		return n.log[n.log.len - 1].term
+	}
+	return n.snapshot_term
+}
+
+// log_array_index maps a Raft log index to a position in n.log (-1 if not present).
+fn (n &RaftNode) log_array_index(raft_index int) int {
+	if raft_index <= n.snapshot_index {
+		return -1
+	}
+	ai := raft_index - n.snapshot_index - 1
+	if ai < 0 || ai >= n.log.len {
+		return -1
+	}
+	return ai
+}
+
+// term_at returns the term at raft_index (snapshot or log). ok=false if unknown.
+fn (n &RaftNode) term_at(raft_index int) (int, bool) {
+	if raft_index == 0 {
+		return 0, true
+	}
+	if raft_index == n.snapshot_index {
+		return n.snapshot_term, true
+	}
+	ai := n.log_array_index(raft_index)
+	if ai < 0 {
+		return 0, false
+	}
+	return n.log[ai].term, true
+}
+
+// compact_log truncates durable log entries with index <= through_index into a snapshot.
+// snapshot_data is left empty (use install_snapshot to supply opaque state).
+pub fn (mut n RaftNode) compact_log(through_index int) ! {
+	n.mu.lock()
+	defer { n.mu.unlock() }
+	n.compact_log_locked(through_index, '')!
+}
+
+// install_snapshot records a snapshot covering indices 1..=last_included_index and
+// drops matching prefix from the in-memory log. Persists via Storage.
+pub fn (mut n RaftNode) install_snapshot(last_included_index int, last_included_term int, data string) ! {
+	n.mu.lock()
+	defer { n.mu.unlock() }
+	if last_included_index < n.snapshot_index {
+		return error('install_snapshot: index ${last_included_index} behind existing snapshot ${n.snapshot_index}')
+	}
+	n.snapshot_index = last_included_index
+	n.snapshot_term = last_included_term
+	n.snapshot_data = data
+	mut kept := []LogEntry{}
+	for e in n.log {
+		if e.index > last_included_index {
+			kept << e
+		}
+	}
+	n.log = kept
+	if n.last_applied < last_included_index {
+		n.last_applied = last_included_index
+	}
+	if n.commit_index < last_included_index {
+		n.commit_index = last_included_index
+	}
+	n.persist_locked()
+}
+
+fn (mut n RaftNode) compact_log_locked(through_index int, data string) ! {
+	if through_index <= n.snapshot_index {
+		return error('compact_log: through_index ${through_index} <= snapshot_index ${n.snapshot_index}')
+	}
+	last := n.last_log_index()
+	if through_index > last {
+		return error('compact_log: through_index ${through_index} > last_log_index ${last}')
+	}
+	term, ok := n.term_at(through_index)
+	if !ok {
+		return error('compact_log: no term for index ${through_index}')
+	}
+	n.snapshot_index = through_index
+	n.snapshot_term = term
+	if data.len > 0 {
+		n.snapshot_data = data
+	}
+	mut kept := []LogEntry{}
+	for e in n.log {
+		if e.index > through_index {
+			kept << e
+		}
+	}
+	n.log = kept
+	if n.last_applied < through_index {
+		n.last_applied = through_index
+	}
+	if n.commit_index < through_index {
+		n.commit_index = through_index
+	}
+	n.persist_locked()
 }
 
 // start starts the Raft node
@@ -293,6 +460,7 @@ fn (mut n RaftNode) become_candidate() {
 	n.state = .candidate
 	n.current_term++
 	n.voted_for = n.id
+	n.persist_locked()
 	n.reset_election_timer()
 	
 	println('[Raft] Node ${n.id} became candidate for term ${n.current_term}')
@@ -309,8 +477,9 @@ fn (mut n RaftNode) become_leader() {
 	n.state = .leader
 	
 	// Initialize leader state
+	next := n.last_log_index() + 1
 	for peer in n.peers {
-		n.next_index[peer] = n.log.len + 1
+		n.next_index[peer] = next
 		n.match_index[peer] = 0
 	}
 	
@@ -332,6 +501,7 @@ fn (mut n RaftNode) become_follower(term int) {
 	n.state = .follower
 	n.current_term = term
 	n.voted_for = none
+	n.persist_locked()
 	n.reset_election_timer()
 }
 
@@ -340,8 +510,8 @@ fn (mut n RaftNode) start_election() {
 	n.mu.lock()
 	n.votes_granted = 1 // self-vote
 	term := n.current_term
-	last_log_index := n.log.len
-	last_log_term := if n.log.len > 0 { n.log[n.log.len - 1].term } else { 0 }
+	last_log_index := n.last_log_index()
+	last_log_term := n.last_log_term()
 	peers := n.peers.clone()
 	n.mu.unlock()
 
@@ -422,17 +592,17 @@ fn (mut n RaftNode) send_heartbeats() {
 // send_append_entries sends append entries / heartbeat to a peer through Transport
 fn (mut n RaftNode) send_append_entries(peer string, term int, leader_commit int) {
 	n.mu.lock()
-	next_idx := n.next_index[peer] or { 1 }
-	prev_log_index := next_idx - 1
-	prev_log_term := if prev_log_index > 0 && prev_log_index <= n.log.len {
-		n.log[prev_log_index - 1].term
-	} else {
-		0
+	mut next_idx := n.next_index[peer] or { n.snapshot_index + 1 }
+	if next_idx <= n.snapshot_index {
+		next_idx = n.snapshot_index + 1
 	}
+	prev_log_index := next_idx - 1
+	prev_log_term, _ := n.term_at(prev_log_index)
 
 	mut entries := []LogEntry{}
-	if next_idx <= n.log.len {
-		entries = n.log[next_idx - 1..]
+	ai := n.log_array_index(next_idx)
+	if ai >= 0 {
+		entries = n.log[ai..]
 	}
 	n.mu.unlock()
 
@@ -501,26 +671,34 @@ pub fn (mut n RaftNode) handle_vote_request(req VoteRequest) VoteResult {
 	}
 	
 	// If term > currentTerm, convert to follower
+	mut dirty := false
 	if req.term > n.current_term {
 		n.current_term = req.term
 		n.voted_for = none
 		n.state = .follower
+		dirty = true
 	}
 	
 	// Check if we can vote for this candidate
-	can_vote := n.voted_for == none || n.voted_for == req.candidate_id
-	
+	voted := n.voted_for or { '' }
+	can_vote := voted.len == 0 || voted == req.candidate_id
+
 	// Check if candidate's log is at least as up-to-date as ours
-	last_log_index := n.log.len
-	last_log_term := if n.log.len > 0 { n.log[n.log.len - 1].term } else { 0 }
-	
-	log_is_up_to_date := req.last_log_term > last_log_term || 
+	last_log_index := n.last_log_index()
+	last_log_term := n.last_log_term()
+
+	log_is_up_to_date := req.last_log_term > last_log_term ||
 		(req.last_log_term == last_log_term && req.last_log_index >= last_log_index)
 	
 	if can_vote && log_is_up_to_date {
 		n.voted_for = req.candidate_id
 		n.reset_election_timer()
+		n.persist_locked()
 		return VoteResult{term: n.current_term, vote_granted: true, node_id: n.id}
+	}
+
+	if dirty {
+		n.persist_locked()
 	}
 	
 	return VoteResult{term: n.current_term, vote_granted: false, node_id: n.id}
@@ -537,46 +715,73 @@ pub fn (mut n RaftNode) handle_append_entries(req AppendEntries) AppendResult {
 	}
 	
 	// If term >= currentTerm, convert to follower
+	mut dirty := false
 	if req.term > n.current_term || n.state != .follower {
 		n.current_term = req.term
 		n.voted_for = none
 		n.state = .follower
+		dirty = true
 	}
 	
 	n.reset_election_timer()
-	
-	// Check prev log entry
+
+	last_idx := n.last_log_index()
+
+	// Check prev log entry (respect snapshot)
 	if req.prev_log_index > 0 {
-		if req.prev_log_index > n.log.len {
-			return AppendResult{term: n.current_term, success: false, node_id: n.id, match_index: n.log.len}
+		if req.prev_log_index > last_idx {
+			if dirty {
+				n.persist_locked()
+			}
+			return AppendResult{term: n.current_term, success: false, node_id: n.id, match_index: last_idx}
 		}
-		if req.prev_log_index > 0 && n.log[req.prev_log_index - 1].term != req.prev_log_term {
+		if req.prev_log_index < n.snapshot_index {
+			if dirty {
+				n.persist_locked()
+			}
+			return AppendResult{term: n.current_term, success: false, node_id: n.id, match_index: n.snapshot_index}
+		}
+		pt, ok := n.term_at(req.prev_log_index)
+		if !ok || pt != req.prev_log_term {
+			if dirty {
+				n.persist_locked()
+			}
 			return AppendResult{term: n.current_term, success: false, node_id: n.id, match_index: req.prev_log_index - 1}
 		}
 	}
-	
-	// Append new entries
+
+	// Append new entries (array offset = raft_index - snapshot_index - 1)
 	if req.entries.len > 0 {
-		// Remove conflicting entries and append new ones
 		for i, entry in req.entries {
-			idx := req.prev_log_index + i
-			if idx < n.log.len {
-				if n.log[idx].term != entry.term {
-					n.log = n.log[..idx]
+			raft_idx := req.prev_log_index + 1 + i
+			if raft_idx <= n.snapshot_index {
+				continue
+			}
+			ai := raft_idx - n.snapshot_index - 1
+			if ai < n.log.len {
+				if n.log[ai].term != entry.term {
+					n.log = n.log[..ai]
 					n.log << entry
+					dirty = true
 				}
 			} else {
 				n.log << entry
+				dirty = true
 			}
 		}
 	}
-	
-	// Update commit index
+
+	// Update commit index (volatile — not required on disk for this wave)
 	if req.leader_commit > n.commit_index {
 		n.commit_index = req.leader_commit
-		if n.log.len < n.commit_index {
-			n.commit_index = n.log.len
+		lli := n.last_log_index()
+		if lli < n.commit_index {
+			n.commit_index = lli
 		}
+	}
+
+	if dirty {
+		n.persist_locked()
 	}
 	
 	return AppendResult{
@@ -598,12 +803,13 @@ pub fn (mut n RaftNode) propose(command string, data string) ! {
 	
 	entry := LogEntry{
 		term:    n.current_term
-		index:   n.log.len + 1
+		index:   n.last_log_index() + 1
 		command: command
 		data:    data
 	}
 	
 	n.log << entry
+	n.persist_locked()
 	println('[Raft] Proposed command at index ${entry.index}')
 }
 

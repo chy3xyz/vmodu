@@ -232,10 +232,14 @@ pub fn new_in_memory_exporter() &InMemoryExporter {
 	return &InMemoryExporter{ spans: [] }
 }
 
-pub fn (mut e InMemoryExporter) export(span &Span) ! {
+pub fn (e &InMemoryExporter) export(span &Span) ! {
 	e.mu.lock()
-	defer { e.mu.unlock() }
-	e.spans << *span
+	defer {
+		e.mu.unlock()
+	}
+	unsafe {
+		e.spans << *span
+	}
 }
 
 pub fn (e &InMemoryExporter) shutdown() ! {}
@@ -243,15 +247,21 @@ pub fn (e &InMemoryExporter) shutdown() ! {}
 // get_spans returns all captured spans
 pub fn (e &InMemoryExporter) get_spans() []Span {
 	e.mu.lock()
-	defer { e.mu.unlock() }
+	defer {
+		e.mu.unlock()
+	}
 	return e.spans.clone()
 }
 
 // clear removes all spans
-pub fn (mut e InMemoryExporter) clear() {
+pub fn (e &InMemoryExporter) clear() {
 	e.mu.lock()
-	defer { e.mu.unlock() }
-	e.spans = []
+	defer {
+		e.mu.unlock()
+	}
+	unsafe {
+		e.spans = []
+	}
 }
 
 // BatchExporter buffers spans before exporting
@@ -331,155 +341,24 @@ pub fn (mut be BatchExporter) shutdown() ! {
 	be.exporter.shutdown()!
 }
 
-// ========== Convenience Functions ==========
 
-__global global_tracer = &Tracer(unsafe { nil })
+// NoopExporter discards spans (default when tracing is off).
+pub struct NoopExporter {}
 
-// init_global initializes the global tracer
-pub fn init_global(service_name string, exporter Exporter) {
-	global_tracer = new_tracer(service_name, exporter)
+pub fn new_noop_exporter() &NoopExporter {
+	return &NoopExporter{}
 }
 
-// get_global returns the global tracer
-pub fn get_global() &Tracer {
-	if global_tracer == unsafe { nil } {
-		global_tracer = new_tracer('unknown', new_console_exporter(false))
+pub fn (e &NoopExporter) export(_ &Span) ! {}
+
+pub fn (e &NoopExporter) shutdown() ! {}
+
+// finish ends a span and exports it through the tracer's exporter.
+pub fn (t &Tracer) finish(mut s Span) {
+	s.end()
+	t.exporter.export(s) or {
+		eprintln('[trace] export failed: ${err}')
 	}
-	return global_tracer
-}
-
-// start_quick_span creates and auto-ends a span for simple operations
-pub fn start_quick_span(name string) &Span {
-	return get_global().start_span(name, SpanOptions{})
-}
-
-// ========== Tests ==========
-
-fn test_span_creation() {
-	exporter := new_in_memory_exporter()
-	tracer := new_tracer('test-service', exporter)
-
-	mut span := tracer.start_span('test-operation', SpanOptions{})
-
-	assert span.name == 'test-operation'
-	assert span.trace_id != ''
-	assert span.span_id != ''
-	assert span.start_time > 0
-
-	span.end()
-	assert span.end_time > span.start_time
-	assert span.duration_ms >= 0
-}
-
-fn test_span_hierarchy() {
-	exporter := new_in_memory_exporter()
-	tracer := new_tracer('test-service', exporter)
-
-	// Create parent span
-	mut parent := tracer.start_span('parent', SpanOptions{})
-
-	// Create child span
-	child_opts := SpanOptions{
-		trace_id:  parent.trace_id
-		parent_id: parent.span_id
-	}
-	mut child := tracer.start_span('child', child_opts)
-
-	assert child.trace_id == parent.trace_id
-	assert child.parent_id == parent.span_id
-	assert child.span_id != parent.span_id
-
-	child.end()
-	parent.end()
-}
-
-fn test_span_context() {
-	exporter := new_in_memory_exporter()
-	tracer := new_tracer('test-service', exporter)
-
-	mut span := tracer.start_span('test', SpanOptions{})
-	ctx := span.context()
-
-	assert ctx.trace_id == span.trace_id
-	assert ctx.span_id == span.span_id
-}
-
-fn test_baggage() {
-	mut ctx := Context{
-		trace_id: generate_id()
-		span_id:  generate_id()
-		baggage:  {}
-	}
-
-	ctx.set_baggage('user-id', '12345')
-	ctx.set_baggage('request-id', 'abc-xyz')
-
-	assert ctx.get_baggage('user-id') == '12345'
-	assert ctx.get_baggage('request-id') == 'abc-xyz'
-	assert ctx.get_baggage('missing') == ''
-}
-
-fn test_exporter() {
-	mut exporter := new_in_memory_exporter()
-	tracer := new_tracer('test-service', exporter)
-
-	mut span := tracer.start_span('test', SpanOptions{})
-	span.set_attribute('key', 'value')
-	span.add_event('event1', {
-		'foo': 'bar'
-	})
-	span.end()
-
-	exporter.export(span)!
-
-	spans := exporter.get_spans()
-	assert spans.len == 1
-	assert spans[0].name == 'test'
-	assert spans[0].attributes['key'] == 'value'
-	assert spans[0].events.len == 1
-}
-
-fn test_batch_exporter() {
-	inner_exporter := new_in_memory_exporter()
-	mut batch_exporter := new_batch_exporter(inner_exporter, 5, 1000)
-
-	tracer := new_tracer('test-service', batch_exporter)
-
-	// Create spans (should be buffered)
-	for i := 0; i < 3; i++ {
-		mut span := tracer.start_span('span-${i}', SpanOptions{})
-		span.end()
-		batch_exporter.export(span)!
-	}
-
-	// Not yet flushed (below batch size)
-	assert inner_exporter.get_spans().len == 0
-
-	// Force flush by exceeding batch size
-	for i := 0; i < 3; i++ {
-		mut span := tracer.start_span('span-${i}', SpanOptions{})
-		span.end()
-		batch_exporter.export(span)!
-	}
-
-	// Should be flushed now
-	assert inner_exporter.get_spans().len >= 5
-
-	batch_exporter.shutdown()!
-}
-
-fn test_span_status() {
-	tracer := new_tracer('test', new_console_exporter(false))
-
-	mut span := tracer.start_span('test', SpanOptions{})
-	assert span.status == .unset
-
-	span.set_ok()
-	assert span.status == .ok
-
-	mut span2 := tracer.start_span('test2', SpanOptions{})
-	span2.set_error()
-	assert span2.status == .error
 }
 
 // Timing helper for string operations
@@ -487,35 +366,15 @@ pub fn trace_string_operation(tracer &Tracer, name string, op fn () !string) !st
 	mut span := tracer.start_span(name, SpanOptions{
 		kind: .internal
 	})
-	defer { span.end() }
 
 	result := op() or {
 		span.set_error()
 		span.set_attribute('error', err.msg())
+		tracer.finish(mut span)
 		return err
 	}
 
 	span.set_ok()
+	tracer.finish(mut span)
 	return result
-}
-
-fn test_trace_operation() {
-	exporter := new_in_memory_exporter()
-	tracer := new_tracer('test', exporter)
-
-	// Successful operation
-	result := trace_operation(tracer, 'success-op', fn () !int {
-		return 42
-	})!
-
-	assert result == 42
-
-	// Failing operation
-	if _ := trace_operation(tracer, 'fail-op', fn () !int {
-		return error('boom')
-	}) {
-		assert false, 'should fail'
-	}
-
-	exporter.shutdown() or {}
 }

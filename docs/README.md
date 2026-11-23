@@ -40,6 +40,7 @@ Marked ⚠️ in the root [README](../README.md) module table:
 
 - `wasm/sandbox`, `wasm/wasmtime`
 - parts of `agent/llm`
+- `infra/payment`, `infra/mq` (external brokers; InMemory OK), `infra/rpc`
 - `adapters/evm`, `adapters/solana`
 
 ## Archive

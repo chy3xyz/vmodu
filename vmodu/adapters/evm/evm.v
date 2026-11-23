@@ -1,5 +1,7 @@
 // evm.v - EVM (Ethereum) Adapter for Web3 interactions
 // Provides RPC client for Ethereum-compatible chains
+//
+// EXPERIMENTAL: Stub / scaffold — not production EVM connectivity or signing.
 
 module evm
 

@@ -1,5 +1,8 @@
 // mq.v - Message Queue for VModulith
 // Reuses: net, sync from V standard library
+//
+// EXPERIMENTAL (external brokers): RabbitMQ / Kafka clients are stubs.
+// InMemoryQueue is OK for local/dev and in-process use.
 
 module mq
 

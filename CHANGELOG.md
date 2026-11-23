@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- (none yet)
+
+## [0.2.0] - 2026-11-23
+
+### Added
+- Spec/plan: `docs/superpowers/specs/2026-11-21-production-hardening-design.md`, `docs/superpowers/plans/2026-11-21-production-hardening.md`.
+- `VERSION`, `docs/RELEASE.md`; runtime env config (`vmodu/config/runtime.v`).
+- HTTP tracing middleware (`trace_middleware`) + `Tracer.finish` / `NoopExporter`.
+
+### Changed
+- **Waves 1–7 production hardening** (SQL params/Tx, HTTP limits/rate/IP/429/request-id/access-log/trace, Raft FileStorage/WAL/snapshot, `/health/deep`, compose-smoke, `VMODU_*` env, version **0.2.0**).
+- Honesty labeling: payment / external MQ / rpc / chain adapters → ⚠️ experimental.
+
+
+
+
+
+
+
+### Added
 - GitHub Actions CI; English-default bilingual OSS docs (`README.md` + `*.zh.md` companions).
 
 ### Changed
